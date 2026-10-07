@@ -111,10 +111,14 @@ describe('store manifest posture', () => {
     for (const mf of [manifest, preview]) {
       const csp = mf.content_security_policy?.extension_pages ?? '';
       expect(csp).toContain('http://*:11434');
-      // Every plain-http source must be on :11434 — nothing wider slipped in.
+      // Every plain-http source must be narrow: either the host-wildcard Ollama
+      // entry on :11434, or a localhost-only source on an explicit port (the
+      // local custom-provider endpoint). Nothing WIDER — no blanket host on an
+      // arbitrary port — may slip in. `http://localhost:<port>` is strictly
+      // narrower than `http://*:11434` (one loopback host, one port).
       const httpSources = csp.match(/http:\/\/\S+/g) ?? [];
       expect(httpSources.length).toBeGreaterThan(0);
-      for (const src of httpSources) expect(src).toMatch(/:11434$/);
+      for (const src of httpSources) expect(src).toMatch(/:11434$|^http:\/\/localhost:\d+$/);
       // No scheme-only `http:` (which would admit any http host on any port).
       expect(csp).not.toMatch(/\bhttp:(?!\/\/)/);
     }

@@ -72,17 +72,17 @@ describe('options.api-integrations', () => {
       const apiForm = root.querySelectorAll('.provider-card-form')[0];
       expect(apiForm.querySelectorAll('input').length).toBe(3);
       expect(need(root, 'input[type=password]')).toBeTruthy();
-      expect(root.textContent).toContain('Save');
+      expect(root.textContent).toContain('保存');
     } finally { unmount(); }
   });
 
   it('folds the Git credentials subsection in under API integrations', async () => {
     const { root, unmount } = await mountView(makeSend());
     try {
-      expect(root.textContent).toContain('Git credentials');
-      expect(root.textContent).toContain('No git tokens yet');   // the git list's empty state
-      expect(root.textContent).toContain('No site clients yet'); // malformed/partial replies degrade safely
-      expect(root.textContent).toContain('Notebooks, and Pods');
+      expect(root.textContent).toContain('Git 凭据');
+      expect(root.textContent).toContain('暂无 git 令牌');   // the git list's empty state
+      expect(root.textContent).toContain('尚无站点客户端'); // malformed/partial replies degrade safely
+      expect(root.textContent).toContain('笔记本和 Pod');
       // Two forms now: API keys + git tokens, both under the one API-integrations section.
       expect(root.querySelectorAll('.provider-card-form').length).toBe(2);
     } finally { unmount(); }
@@ -91,7 +91,7 @@ describe('options.api-integrations', () => {
   it('shows an empty state when no integrations are stored', async () => {
     const { root, unmount } = await mountView(makeSend({ 'origin-cred/list': () => ({ ok: true, integrations: [] }) }));
     try {
-      expect(root.textContent).toContain('No API integrations yet');
+      expect(root.textContent).toContain('暂无 API 集成');
     } finally { unmount(); }
   });
 
@@ -102,9 +102,9 @@ describe('options.api-integrations', () => {
       'site-client/list': () => ({ ok: true }),
     }));
     try {
-      expect(root.textContent).toContain('No API integrations yet');
-      expect(root.textContent).toContain('No git tokens yet');
-      expect(root.textContent).toContain('No site clients yet');
+      expect(root.textContent).toContain('暂无 API 集成');
+      expect(root.textContent).toContain('暂无 git 令牌');
+      expect(root.textContent).toContain('尚无站点客户端');
     } finally { unmount(); }
   });
 

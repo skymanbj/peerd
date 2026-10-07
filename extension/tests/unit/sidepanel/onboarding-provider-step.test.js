@@ -71,7 +71,7 @@ describe('sidepanel.onboarding provider step (§5h)', () => {
       m.redraw.sync();
       const rowEls = h.root.querySelectorAll('.onb-provider-row');
       expect(rowEls.length).toBe(3);
-      expect(need(h.root, '.onb-provider-row.is-unusable').textContent).toContain('NOT YET USABLE');
+      expect(need(h.root, '.onb-provider-row.is-unusable').textContent).toContain('尚不可用');
       // Anthropic leads selected → the key input renders with its prefix hint.
       const input = /** @type {HTMLInputElement} */ (need(h.root, '#onb-key'));
       expect(input.getAttribute('placeholder')).toBe('sk-ant-...');
@@ -125,7 +125,7 @@ describe('sidepanel.onboarding provider step (§5h)', () => {
       await tick(); await tick(); await tick(); await tick();
       m.redraw.sync();
       expect(h.sends.some((s) => s.type === 'settings/update')).toBe(false);
-      expect(need(h.root, '.key-msg').textContent).toContain('rejected the key');
+      expect(need(h.root, '.key-msg').textContent).toContain('提供商拒绝了该密钥');
       expect(h.doneCount()).toBe(0);
     } finally { h.unmount(); }
   });
@@ -135,14 +135,14 @@ describe('sidepanel.onboarding provider step (§5h)', () => {
     try {
       await tick(); await tick();
       m.redraw.sync();
-      expect(reached.root.textContent).toContain('REACHED');
+      expect(reached.root.textContent).toContain('已连接');
     } finally { reached.unmount(); }
     const down = makeHarness({ ollamaOk: false });
     try {
       await tick(); await tick();
       m.redraw.sync();
-      expect((down.root.textContent ?? '').includes('REACHED')).toBe(false);
-      expect(down.root.textContent).toContain('NO KEY NEEDED');
+      expect((down.root.textContent ?? '').includes('已连接')).toBe(false);
+      expect(down.root.textContent).toContain('无需密钥');
     } finally { down.unmount(); }
   });
 

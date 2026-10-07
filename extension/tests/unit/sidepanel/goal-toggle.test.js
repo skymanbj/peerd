@@ -45,7 +45,7 @@ describe('GoalToggle (mode-row goal arming)', () => {
     const { root, unmount } = mount({ onToggle: makeToggle() });
     try {
       const btn = needToggle(root);
-      expect(btn.textContent).toBe('Goal');
+      expect(btn.textContent).toBe('目标');
       expect(btn.getAttribute('aria-pressed')).toBe('false');
       expect(btn.className.includes('is-on')).toBe(false);
       expect(btn.disabled).toBe(false);
@@ -66,7 +66,7 @@ describe('GoalToggle (mode-row goal arming)', () => {
     const { root, unmount } = mount({ armed: true, onToggle });
     try {
       const btn = needToggle(root);
-      expect(btn.textContent).toBe('Goal: on');
+      expect(btn.textContent).toBe('目标：开');
       expect(btn.getAttribute('aria-pressed')).toBe('true');
       expect(btn.className.includes('is-on')).toBe(true);
       btn.click();

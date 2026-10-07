@@ -33,15 +33,15 @@ describe('options.dweb live-stop status', () => {
     };
     m.mount(root, { view: () => m(DwebSection, { state, send, loadStatus: async () => null }) });
     try {
-      button(root, 'Disable dweb').click();
+      button(root, '禁用 dweb').click();
       await settle();
       const alert = root.querySelector('[role="alert"]');
-      expect(alert?.textContent).toContain('live network could not be stopped');
-      expect(button(root, 'Retry stopping dweb') instanceof HTMLButtonElement).toBe(true);
-      button(root, 'Retry stopping dweb').click();
+      expect(alert?.textContent).toContain('实时网络无法停止');
+      expect(button(root, '重试停止 dweb') instanceof HTMLButtonElement).toBe(true);
+      button(root, '重试停止 dweb').click();
       await settle();
       expect(root.querySelector('[role="alert"]')).toBe(null);
-      expect(button(root, 'Enable dweb') instanceof HTMLButtonElement).toBe(true);
+      expect(button(root, '启用 dweb') instanceof HTMLButtonElement).toBe(true);
       expect(calls.map((call) => call.patch)).toEqual([
         { dwebEnabled: false },
         { dwebEnabled: false },

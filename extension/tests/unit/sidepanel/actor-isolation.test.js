@@ -25,8 +25,8 @@ describe('sidepanel actor isolation UX', () => {
     try {
       await flush();
       expect(root.querySelector('[role="status"][aria-live="polite"]')).toBeTruthy();
-      expect(root.textContent).toContain('Use Try again before retrying an actor request');
-      expect(root.textContent).toContain('isolation state could not be confirmed');
+      expect(root.textContent).toContain('重试参与者请求前请先使用“重试”');
+      expect(root.textContent).toContain('无法确认隔离状态');
       expect(root.textContent.includes('worker import failed')).toBe(false);
       const retry = /** @type {HTMLButtonElement} */ (root.querySelector('button'));
       retry.click();
@@ -35,7 +35,7 @@ describe('sidepanel actor isolation UX', () => {
       const busyButton = /** @type {HTMLButtonElement} */ (busy.querySelector('button'));
       expect(busy.getAttribute('aria-busy')).toBe('true');
       expect(busyButton.disabled).toBe(true);
-      expect(busyButton.textContent).toContain('Retrying actor worker');
+      expect(busyButton.textContent).toContain('正在重试参与者工作器');
     } finally { m.mount(root, null); root.remove(); }
   });
 
@@ -52,8 +52,8 @@ describe('sidepanel actor isolation UX', () => {
       await flush();
       /** @type {HTMLButtonElement} */ (root.querySelector('button')).click();
       await flush();
-      expect(root.textContent).toContain('Actor work is still paused');
-      expect(root.textContent).toContain('Actor execution could not be restored');
+      expect(root.textContent).toContain('参与者工作仍处于暂停状态');
+      expect(root.textContent).toContain('无法恢复参与者执行');
       expect(root.textContent.includes('private runtime messaging failure')).toBe(false);
       expect(root.textContent.includes('private worker stack')).toBe(false);
     } finally { m.mount(root, null); root.remove(); }
@@ -70,7 +70,7 @@ describe('sidepanel actor isolation UX', () => {
     });
     try {
       await flush();
-      expect(root.textContent).toContain('Actors are unavailable');
+      expect(root.textContent).toContain('参与者不可用');
       expect(root.querySelector('button')).toBe(null);
       expect(root.textContent.includes('missing worker API')).toBe(false);
     } finally { m.mount(root, null); root.remove(); }
@@ -96,7 +96,7 @@ describe('sidepanel actor isolation UX', () => {
       await flush();
       const recovered = /** @type {HTMLElement} */ (root.querySelector('.actor-isolation-banner.is-recovered'));
       expect(recovered).toBeTruthy();
-      expect(recovered.textContent).toContain('Actor work is ready');
+      expect(recovered.textContent).toContain('参与者工作已就绪');
       expect(document.activeElement).toBe(recovered);
     } finally { m.mount(root, null); root.remove(); }
   });
@@ -117,11 +117,11 @@ describe('sidepanel actor isolation UX', () => {
       const toggle = /** @type {HTMLButtonElement} */ (root.querySelector('.tool-actor > button.tool-call-header'));
       expect(toggle).toBeTruthy();
       expect(toggle.getAttribute('aria-expanded')).toBe('false');
-      expect(toggle.textContent).toContain('Not run');
+      expect(toggle.textContent).toContain('未运行');
       toggle.click();
       await flush();
       expect(toggle.getAttribute('aria-expanded')).toBe('true');
-      expect(root.textContent).toContain('No actor work was started. Review the request before trying again.');
+      expect(root.textContent).toContain('未启动任何参与者工作。重试前请检查该请求。');
       expect(root.textContent.includes('actor_isolation_unavailable')).toBe(false);
       expect(root.textContent.includes('cannot provide the required isolated worker')).toBe(false);
       expect(root.textContent.includes('Do not retry automatically')).toBe(false);
@@ -158,16 +158,16 @@ describe('sidepanel actor isolation UX', () => {
       await flush();
       const card = /** @type {HTMLButtonElement} */ (root.querySelector('.tool-actor > button.tool-call-header'));
       const replyRole = root.querySelector('.message-actor-reply .role');
-      expect(card.textContent).toContain('Outcome unknown');
-      expect(card.textContent.includes('Not run')).toBe(false);
-      expect(replyRole?.textContent).toContain('Outcome unknown');
-      expect(replyRole?.textContent?.includes('Not run')).toBe(false);
+      expect(card.textContent).toContain('结果未知');
+      expect(card.textContent.includes('未运行')).toBe(false);
+      expect(replyRole?.textContent).toContain('结果未知');
+      expect(replyRole?.textContent?.includes('未运行')).toBe(false);
       const reply = root.querySelector('.message-actor-reply');
       expect(reply?.getAttribute('role')).toBe(null);
       expect(reply?.getAttribute('aria-live')).toBe(null);
       expect(root.querySelector('.actor-recovery-announcement')).toBe(null);
-      expect(root.textContent).toContain('peerd cannot confirm whether the actor ran or completed');
-      expect(root.textContent).toContain('Check the target before trying again');
+      expect(root.textContent).toContain('peerd 无法确认参与者是否已运行或完成');
+      expect(root.textContent).toContain('重试前请检查目标');
       expect(root.textContent.includes('Do not retry automatically')).toBe(false);
     } finally { m.mount(root, null); root.remove(); }
   });
@@ -189,12 +189,12 @@ describe('sidepanel actor isolation UX', () => {
       await flush();
       const reply = root.querySelector('.message-actor-reply');
       expect(reply).toBeTruthy();
-      expect(reply?.querySelector('.role')?.textContent).toContain('Not run');
+      expect(reply?.querySelector('.role')?.textContent).toContain('未运行');
       expect(reply?.querySelector('.role')?.textContent?.includes('failed')).toBe(false);
       expect(reply?.getAttribute('role')).toBe(null);
       expect(reply?.getAttribute('aria-live')).toBe(null);
       expect(root.querySelectorAll('[role="status"]').length).toBe(0);
-      expect(root.textContent).toContain('No actor work was started. Review the request before trying again.');
+      expect(root.textContent).toContain('未启动任何参与者工作。重试前请检查该请求。');
       expect(root.textContent.includes('before this actor request was dispatched')).toBe(false);
     } finally { m.mount(root, null); root.remove(); }
   });
@@ -221,7 +221,7 @@ describe('sidepanel actor isolation UX', () => {
       const status = root.querySelector('.actor-recovery-announcement[role="status"]');
       expect(status?.getAttribute('aria-live')).toBe('polite');
       expect(status?.getAttribute('aria-atomic')).toBe('true');
-      expect(status?.textContent).toContain('Actor request not run');
+      expect(status?.textContent).toContain('参与者请求未运行');
       expect(root.querySelectorAll('[role="status"]').length).toBe(1);
 
       m.mount(root, null);
@@ -257,7 +257,7 @@ describe('sidepanel actor isolation UX', () => {
       }];
       m.redraw.sync();
       expect(root.querySelector('.actor-recovery-announcement')?.textContent)
-        .toContain('Actor outcome unknown');
+        .toContain('参与者结果未知');
 
       sessionId = 'chat-empty';
       messages = [];
@@ -295,7 +295,7 @@ describe('sidepanel actor isolation UX', () => {
       }];
       m.redraw.sync();
       expect(root.querySelector('.actor-recovery-announcement')?.textContent)
-        .toContain('Actor outcome unknown');
+        .toContain('参与者结果未知');
 
       sessionId = 'chat-a';
       messages = [{ role: 'user', id: 'human-a', content: 'status?', when: 1 }];
@@ -332,7 +332,7 @@ describe('sidepanel actor isolation UX', () => {
       });
       m.redraw.sync();
       expect(root.querySelector('.actor-recovery-announcement')?.textContent)
-        .toContain('Actor outcome unknown');
+        .toContain('参与者结果未知');
 
       messages.push({
         role: 'user', id: 'actor-recovery:chat-live:queued-2', synthetic: true,
@@ -344,7 +344,7 @@ describe('sidepanel actor isolation UX', () => {
       });
       m.redraw.sync();
       expect(root.querySelector('.actor-recovery-announcement')?.textContent)
-        .toContain('Actor request not run');
+        .toContain('参与者请求未运行');
 
       await new Promise((resolve) => setTimeout(resolve, 1_100));
       m.redraw.sync();
@@ -386,7 +386,7 @@ describe('sidepanel actor isolation UX', () => {
     try {
       await flush();
       const toggle = /** @type {HTMLButtonElement} */ (root.querySelector('.tool-actor > button.tool-call-header'));
-      expect(toggle.textContent).toContain('Outcome unknown');
+      expect(toggle.textContent).toContain('结果未知');
       expect(root.querySelector('.actor-unknown-announcement')).toBe(null);
       expect(root.querySelector('.actor-recovery-announcement')).toBe(null);
       expect(root.querySelectorAll('[role="status"]').length).toBe(0);
@@ -418,7 +418,7 @@ describe('sidepanel actor isolation UX', () => {
       m.redraw.sync();
       const status = root.querySelector('.actor-recovery-announcement[role="status"]');
       expect(status?.getAttribute('aria-live')).toBe('polite');
-      expect(status?.textContent).toContain('Actor outcome unknown');
+      expect(status?.textContent).toContain('参与者结果未知');
       expect(root.querySelectorAll('[role="status"]').length).toBe(1);
       m.redraw.sync();
       expect(root.querySelectorAll('[role="status"]').length).toBe(1);
@@ -436,7 +436,7 @@ describe('sidepanel actor isolation UX', () => {
       await flush();
       /** @type {HTMLButtonElement} */ (root.querySelector('.tool-actor > button.tool-call-header')).click();
       await flush();
-      expect(root.textContent).toContain('request accepted; check later messages');
+      expect(root.textContent).toContain('请求已接受；请查看后续消息');
       expect(root.textContent.includes('reply delivered')).toBe(false);
     } finally { m.mount(root, null); root.remove(); }
   });
@@ -476,16 +476,16 @@ describe('sidepanel actor isolation UX', () => {
     try {
       await flush();
       const toggle = /** @type {HTMLButtonElement} */ (root.querySelector('.tool-actor > button.tool-call-header'));
-      expect(toggle.textContent).toContain('Outcome unknown');
+      expect(toggle.textContent).toContain('结果未知');
       expect(toggle.textContent.includes('done')).toBe(false);
-      expect(toggle.title === 'Not run').toBe(false);
+      expect(toggle.title === '未运行').toBe(false);
       expect(root.querySelector('.actor-unknown-announcement')).toBe(null);
       expect(root.querySelector('.actor-recovery-announcement')).toBe(null);
       expect(root.querySelectorAll('[role="status"]').length).toBe(0);
       toggle.click();
       await flush();
       const body = root.querySelector('.tool-actor .actor-body');
-      expect(body?.textContent).toContain('Check the target before trying again');
+      expect(body?.textContent).toContain('重试前请检查目标');
       expect(body?.textContent?.includes('Do not retry automatically')).toBe(false);
     } finally { m.mount(root, null); root.remove(); }
   });

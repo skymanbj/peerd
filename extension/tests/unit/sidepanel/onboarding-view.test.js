@@ -153,14 +153,14 @@ describe('sidepanel.onboarding', () => {
       });
       try {
         await passProviderStep(root);
-        expect(root.textContent).toContain('Hello, I’m');
+        expect(root.textContent).toContain('你好，我是');
         // The name is a real input (it owns the caret) twinned with a
         // colored mirror; the input's text is transparent via CSS, so
         // the mirror is what the user actually reads.
         const input = need(root, '.peer-name-input', HTMLInputElement);
         expect(!!input).toBe(true);
         expect(input.value).toBe('peerd');
-        expect(input.getAttribute('aria-label')).toContain('editable');
+        expect(input.getAttribute('aria-label')).toContain('可编辑');
         const mirror = need(root, '.peer-name-mirror');
         expect(!!mirror).toBe(true);
         // One brand-colored span per character, cycling the five vars.

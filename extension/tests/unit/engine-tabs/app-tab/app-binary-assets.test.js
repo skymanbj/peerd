@@ -422,7 +422,7 @@ describe('App runner durable data', () => {
     expect(await data.request('list')).toEqual({ ok: true, value: ['document'] });
     expect(await data.request('set', '../escape', '{}')).toEqual({ ok: false, error: 'invalid App data key' });
     expect(await data.request('set', 'large', `"${'x'.repeat(MAX_APP_DATA_BYTES)}"`))
-      .toEqual({ ok: false, error: 'App data value is too large' });
+      .toEqual({ ok: false, error: 'App data value too large' });
     expect(await data.request('delete', 'document')).toEqual({ ok: true, value: true });
     expect(await data.request('get', 'document')).toEqual({ ok: true, value: null });
     expect(calls).toEqual([

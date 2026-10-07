@@ -38,23 +38,23 @@ describe('Contributor Metrics human UI', () => {
     m.mount(root, { view: () => m(ContributorMetricsSection, { send }) });
     try {
       await settle();
-      expect(root.textContent).toContain('peerd works fully without Contributor Metrics');
-      expect(root.textContent).toContain('Included');
-      expect(root.textContent).toContain('Never included');
-      expect(root.textContent).toContain('URLs, origins, hosts');
-      expect(root.textContent).toContain('consent-rotated opaque tokens');
-      expect(root.textContent).toContain('limited to preview and dev');
-      expect(root.textContent).toContain('individually deleted');
-      expect(root.textContent).toContain('provider, and known model family');
-      expect(root.textContent).toContain('Disclosure version 1; payload schema version 1.');
-      expect(button(root, 'Enable Contributor Metrics') instanceof HTMLButtonElement).toBe(true);
-      button(root, 'Enable Contributor Metrics').click();
+      expect(root.textContent).toContain('没有贡献者指标 peerd 也能完整运行');
+      expect(root.textContent).toContain('包含');
+      expect(root.textContent).toContain('从不包含');
+      expect(root.textContent).toContain('URL、来源、主机');
+      expect(root.textContent).toContain('同意轮换的不透明令牌');
+      expect(root.textContent).toContain('仅限于预览版和开发版');
+      expect(root.textContent).toContain('无法单独删除');
+      expect(root.textContent).toContain('提供者以及已知的模型系列');
+      expect(root.textContent).toContain('披露版本 1；载荷架构版本 1');
+      expect(button(root, '启用贡献者指标') instanceof HTMLButtonElement).toBe(true);
+      button(root, '启用贡献者指标').click();
       await settle();
       const preview = /** @type {HTMLTextAreaElement} */ (root.querySelector('.contributor-payload'));
       expect(preview.readOnly).toBe(true);
       expect(preview.value).toBe(exactBytes);
-      expect(root.textContent).toContain('These are the exact canonical bytes');
-      expect(button(root, 'Disable and clear') instanceof HTMLButtonElement).toBe(true);
+      expect(root.textContent).toContain('确切规范字节');
+      expect(button(root, '禁用并清除') instanceof HTMLButtonElement).toBe(true);
       expect(calls.map((call) => call.type)).toEqual([
         'contributor/status', 'contributor/enable',
       ]);
@@ -84,10 +84,10 @@ describe('Contributor Metrics human UI', () => {
     m.mount(root, { view: () => m(ContributorMetricsSection, { send }) });
     try {
       await settle();
-      expect(root.textContent).toContain('Local state needs attention');
-      expect(root.textContent).toContain('Read-only local state');
-      expect(button(root, 'Enable Contributor Metrics')).toBe(undefined);
-      button(root, 'Disable and clear').click();
+      expect(root.textContent).toContain('本地状态需要关注');
+      expect(root.textContent).toContain('只读本地状态');
+      expect(button(root, '启用贡献者指标')).toBe(undefined);
+      button(root, '禁用并清除').click();
       await settle();
       expect(calls.map((call) => call.type)).toEqual([
         'contributor/status', 'contributor/disable',
@@ -123,10 +123,10 @@ describe('Contributor Metrics human UI', () => {
       const feedback = /** @type {HTMLElement} */ (root.querySelector('.task-feedback'));
       expect(feedback).toBeTruthy();
       expect(feedback.getAttribute('role')).toBe('group');
-      expect(feedback.getAttribute('aria-label')).toBe('Was this response useful?');
+      expect(feedback.getAttribute('aria-label')).toBe('此回复有用吗？');
       expect(feedback.querySelector('input')).toBe(null);
       expect(feedback.querySelector('textarea')).toBe(null);
-      button(feedback, 'worked').click();
+      button(feedback, '有用').click();
       await settle();
       expect(calls).toEqual([{
         type: 'contributor/feedback',
@@ -134,7 +134,7 @@ describe('Contributor Metrics human UI', () => {
         messageId: 'answer-1',
         verdict: 'worked',
       }]);
-      expect(button(feedback, 'worked').getAttribute('aria-pressed')).toBe('true');
+      expect(button(feedback, '有用').getAttribute('aria-pressed')).toBe('true');
       expect(JSON.stringify(messages)).toBe(before);
     } finally {
       m.mount(root, null);
@@ -162,10 +162,10 @@ describe('Contributor Metrics human UI', () => {
     try {
       await settle();
       const feedback = /** @type {HTMLElement} */ (root.querySelector('.task-feedback'));
-      button(feedback, 'worked').click();
+      button(feedback, '有用').click();
       await settle();
-      expect(button(feedback, 'worked').getAttribute('aria-pressed')).toBe('false');
-      expect(feedback.textContent).toContain('enable Contributor Metrics in Settings');
+      expect(button(feedback, '有用').getAttribute('aria-pressed')).toBe('false');
+      expect(feedback.textContent).toContain('请在设置中启用贡献者指标以记录反馈');
     } finally {
       m.mount(root, null);
       root.remove();
@@ -191,8 +191,8 @@ describe('Contributor Metrics human UI', () => {
       const feedback = Array.from(root.querySelectorAll('.task-feedback'));
       expect(feedback.length).toBe(2);
       expect(feedback.map((entry) => entry.closest('.message')?.textContent)).toEqual([
-        'peerdDone.did this work?workeddidn’t work',
-        'peerdAlso done.did this work?workeddidn’t work',
+        'peerdDone.这有用吗？有用没用',
+        'peerdAlso done.这有用吗？有用没用',
       ]);
     } finally {
       m.mount(root, null);

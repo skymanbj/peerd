@@ -62,13 +62,13 @@ describe('ModeSelector (Plan/Act + confirm toggle)', () => {
     try {
       const modes = root.querySelectorAll('.planact-mode');
       expect(modes.length).toBe(2);
-      expect(modes[0].textContent).toBe('Plan');
-      expect(modes[1].textContent).toBe('Act');
+      expect(modes[0].textContent).toBe('计划');
+      expect(modes[1].textContent).toBe('执行');
       // The old three-tier dropdown is gone.
       expect(root.querySelector('select')).toBe(null);
       const confirm = need(root, '.planact-confirm');
       expect(!!confirm).toBe(true);
-      expect(confirm.textContent).toBe('Confirm: off');
+      expect(confirm.textContent).toBe('确认：关');
       expect(confirm.getAttribute('aria-pressed')).toBe('false');
     } finally { unmount(); }
   });
@@ -96,7 +96,7 @@ describe('ModeSelector (Plan/Act + confirm toggle)', () => {
     const { root, unmount } = mount({ mode: 'act', confirmActions: true }, send);
     try {
       const confirm = /** @type {HTMLButtonElement} */ (need(root, '.planact-confirm'));
-      expect(confirm.textContent).toBe('Confirm: on');
+      expect(confirm.textContent).toBe('确认：开');
       expect(confirm.getAttribute('aria-pressed')).toBe('true');
       expect(confirm.disabled).toBe(false);
       confirm.click();
@@ -122,7 +122,7 @@ describe('ModeSelector (Plan/Act + confirm toggle)', () => {
     try {
       const modes = root.querySelectorAll('.planact-mode');
       expect(modes[0].className.includes('is-active')).toBe(true);  // Plan
-      expect(need(root, '.planact-confirm').textContent).toBe('Confirm: on');
+      expect(need(root, '.planact-confirm').textContent).toBe('确认：开');
     } finally { unmount(); }
   });
 });

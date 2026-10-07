@@ -573,7 +573,7 @@ throw new Error('unrelated failure');`,
     );
     expect(r.error).toBe(null);
     expect(String(r.value)).toContain('blocked');
-    expect(String(r.value)).toContain('not available');
+    expect(String(r.value)).toContain('unavailable in this worker');
     expect(performance.now() - t0 < 4000).toBe(true);  // fast refusal, not the wall-clock
   });
 

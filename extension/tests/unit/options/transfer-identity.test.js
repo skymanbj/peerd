@@ -51,9 +51,9 @@ describe('options.transfer — portable identity restore', () => {
   it('asks for a passphrase even when the backup carries no API keys', async () => {
     const { root, unmount } = await mount(() => ({ ok: false, error: 'unused' }));
     try {
-      expect(root.textContent).toContain('Peer identity');
+      expect(root.textContent).toContain('对等身份');
       expect(root.querySelector('#imppass')).toBeTruthy();
-      expect(root.textContent).toContain('restoring it may replace an identity');
+      expect(root.textContent).toContain('恢复它可能会替换此安装上创建的身份');
     } finally { unmount(); }
   });
 
@@ -84,24 +84,24 @@ describe('options.transfer — portable identity restore', () => {
       passphrase.dispatchEvent(new Event('input'));
       await flush();
       const apply = /** @type {HTMLButtonElement} */ ([...root.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Apply import'));
+        .find((button) => button.textContent === '应用导入'));
       apply.click();
       await flush();
-      expect(root.querySelector('#identity-conflict')?.textContent).toContain('Identity conflict');
+      expect(root.querySelector('#identity-conflict')?.textContent).toContain('身份冲突');
       expect(root.querySelector('#identity-conflict')?.getAttribute('role')).toBe('alert');
       expect(root.textContent).toContain('did:key:zExistingLocal');
       expect(root.textContent).toContain(RECORD.did);
-      expect(root.textContent).toContain('Keep current identity & import rest');
-      expect(root.textContent).toContain('Review identity replacement');
+      expect(root.textContent).toContain('保留当前身份并导入其余内容');
+      expect(root.textContent).toContain('审阅身份替换');
 
       const keep = /** @type {HTMLButtonElement} */ ([...root.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Keep current identity & import rest'));
+        .find((button) => button.textContent === '保留当前身份并导入其余内容'));
       keep.click();
       await flush();
       const imports = calls.filter((call) => call.type === 'transfer/import');
       expect(imports[1].skipDwebIdentity).toBe(true);
       expect(imports[1].replaceDwebIdentity).toBe(false);
-      expect(root.querySelector('[role=status]')?.textContent).toContain('local peer identity was kept');
+      expect(root.querySelector('[role=status]')?.textContent).toContain('已保留本地对等身份');
     } finally { unmount(); }
   });
 
@@ -116,16 +116,16 @@ describe('options.transfer — portable identity restore', () => {
       passphrase.dispatchEvent(new Event('input'));
       await flush();
       /** @type {HTMLButtonElement} */ ([...root.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Apply import')).click();
+        .find((button) => button.textContent === '应用导入')).click();
       await flush();
       /** @type {HTMLButtonElement} */ ([...root.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Review identity replacement')).click();
+        .find((button) => button.textContent === '审阅身份替换')).click();
       await flush();
-      expect(root.querySelector('#identity-replace-confirmation')?.textContent).toContain('Existing peers will see a new identity');
-      expect(root.textContent).toContain('Permanently replace identity');
+      expect(root.querySelector('#identity-replace-confirmation')?.textContent).toContain('现有对等方将看到新身份');
+      expect(root.textContent).toContain('永久替换身份');
       expect(root.querySelector('button.danger')).toBeTruthy();
       /** @type {HTMLButtonElement} */ ([...root.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Permanently replace identity')).click();
+        .find((button) => button.textContent === '永久替换身份')).click();
       await flush();
       const replacement = calls.filter((/** @type {any} */ call) => call.type === 'transfer/import').at(-1);
       expect(replacement.approvedExistingDwebDid).toBe('did:key:zExistingLocal');
@@ -141,10 +141,10 @@ describe('options.transfer — portable identity restore', () => {
       passphrase.dispatchEvent(new Event('input'));
       await flush();
       const apply = /** @type {HTMLButtonElement} */ ([...root.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Apply import'));
+        .find((button) => button.textContent === '应用导入'));
       apply.click();
       await flush();
-      expect(root.textContent).toContain('final state is unknown');
+      expect(root.textContent).toContain('其最终状态未知');
       expect(root.querySelector('#restore-summary')).toBeFalsy();
       await new Promise((resolve) => requestAnimationFrame(resolve));
       expect(root.querySelector('#peerd-backup-file')).toBe(document.activeElement);
@@ -161,9 +161,9 @@ describe('options.transfer — portable identity restore', () => {
       passphrase.dispatchEvent(new Event('input'));
       await flush();
       /** @type {HTMLButtonElement} */ ([...root.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Apply import')).click();
+        .find((button) => button.textContent === '应用导入')).click();
       await flush();
-      expect(root.querySelector('[role=alert]')?.textContent).toContain('Restore did not start');
+      expect(root.querySelector('[role=alert]')?.textContent).toContain('恢复未开始');
       expect(root.querySelector('#restore-summary')).toBeTruthy();
       expect(/** @type {HTMLInputElement} */ (root.querySelector('#imppass')).value)
         .toBe('backup-passphrase');
@@ -211,12 +211,12 @@ describe('options.transfer — portable identity restore', () => {
       });
       input.dispatchEvent(new Event('change'));
       await flush();
-      expect(root.querySelector('[role=status]')?.textContent).toContain('Inspecting backup');
+      expect(root.querySelector('[role=status]')?.textContent).toContain('正在检查备份');
       const cancel = /** @type {HTMLButtonElement} */ ([...root.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Cancel inspection'));
+        .find((button) => button.textContent === '取消检查'));
       cancel.click();
       await flush();
-      expect(root.textContent?.includes('Inspecting backup')).toBe(false);
+      expect(root.textContent?.includes('正在检查备份')).toBe(false);
       expect(document.activeElement?.id).toBe('peerd-backup-file');
       resolveInspect({ ok: true, summary: SUMMARY });
       await flush();
@@ -238,11 +238,11 @@ describe('options.transfer — portable identity restore', () => {
       passphrase.dispatchEvent(new Event('input'));
       await flush();
       /** @type {HTMLButtonElement} */ ([...root.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Apply import')).click();
+        .find((button) => button.textContent === '应用导入')).click();
       await flush();
-      expect(root.textContent).toContain('2 setting(s), 1 stored credential(s), 0 provider endpoint(s), 3 memory doc(s), and 4 hook(s)');
-      expect(root.textContent).toContain('peer identity was not changed');
-      expect(root.textContent).toContain('peer network could not be paused safely');
+      expect(root.textContent).toContain('2 个设置、1 个存储的凭据、0 个提供者端点、3 个内存文档，以及 4 个钩子');
+      expect(root.textContent).toContain('对等身份未更改');
+      expect(root.textContent).toContain('无法安全暂停对等网络');
       expect(root.querySelector('#restore-summary')).toBeFalsy();
     } finally { unmount(); }
   });
@@ -258,15 +258,15 @@ describe('options.transfer — portable identity restore', () => {
       passphrase.dispatchEvent(new Event('input'));
       await flush();
       /** @type {HTMLButtonElement} */ ([...root.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Apply import')).click();
+        .find((button) => button.textContent === '应用导入')).click();
       await flush();
       /** @type {HTMLButtonElement} */ ([...root.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Review identity replacement')).click();
+        .find((button) => button.textContent === '审阅身份替换')).click();
       await flush();
       /** @type {HTMLButtonElement} */ ([...root.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Go back')).click();
+        .find((button) => button.textContent === '返回')).click();
       await flush();
-      expect(document.activeElement?.textContent).toBe('Review identity replacement');
+      expect(document.activeElement?.textContent).toBe('审阅身份替换');
     } finally { unmount(); }
   });
 
@@ -282,10 +282,10 @@ describe('options.transfer — portable identity restore', () => {
       passphrase.dispatchEvent(new Event('input'));
       await flush();
       /** @type {HTMLButtonElement} */ ([...root.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Apply import')).click();
+        .find((button) => button.textContent === '应用导入')).click();
       await flush();
       expect(document.activeElement?.id).toBe('transfer-import-status');
-      expect(root.querySelector('[role=status]')?.textContent).toContain('peer identity was restored');
+      expect(root.querySelector('[role=status]')?.textContent).toContain('对等身份已恢复');
     } finally { unmount(); }
   });
 
@@ -303,14 +303,14 @@ describe('options.transfer — portable identity restore', () => {
       passphrase.dispatchEvent(new Event('input'));
       await flush();
       /** @type {HTMLButtonElement} */ ([...root.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Apply import')).click();
+        .find((button) => button.textContent === '应用导入')).click();
       await flush();
-      expect(root.textContent).toContain('local peer identity is unreadable');
+      expect(root.textContent).toContain('本地对等身份不可读');
       /** @type {HTMLButtonElement} */ ([...root.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Review identity replacement')).click();
+        .find((button) => button.textContent === '审阅身份替换')).click();
       await flush();
       const confirm = /** @type {HTMLButtonElement} */ ([...root.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Discard damaged identity and restore'));
+        .find((button) => button.textContent === '丢弃损坏的身份并恢复'));
       expect(confirm).toBeTruthy();
       confirm.click();
       await flush();
@@ -329,9 +329,9 @@ describe('options.transfer — portable identity restore', () => {
       passphrase.dispatchEvent(new Event('input'));
       await flush();
       /** @type {HTMLButtonElement} */ ([...root.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Apply import')).click();
+        .find((button) => button.textContent === '应用导入')).click();
       await flush();
-      expect(root.textContent).toContain('identity changed after review');
+      expect(root.textContent).toContain('审阅后本地对等身份发生了变化');
       expect(root.textContent?.includes('dweb-identity-identity-changed')).toBe(false);
     } finally { unmount(); }
   });

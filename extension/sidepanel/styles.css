@@ -100,7 +100,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     /* Graphite neutrals. Brand carriers remain inherited and unchanged. */
     --bg:      #101112;
     --deepest: #080909;
@@ -125,6 +125,36 @@
     --sh-menu:  0 6px 24px rgba(0,0,0,.55), 0 1px 3px rgba(0,0,0,.4);
     --sh-modal: 0 22px 60px rgba(0,0,0,.65), 0 2px 10px rgba(0,0,0,.5);
   }
+}
+
+/* Manual theme override — the rail toggle writes `data-theme` on <html>.
+ * The attribute wins over the OS preference, so the same dark token set is
+ * repeated under an explicit selector (CSS can't share one declaration block
+ * across a media query). `data-theme="light"` simply drops the attribute's
+ * dark branch via the :not() gate above and falls back to the light defaults. */
+:root[data-theme="dark"] {
+  --bg:      #101112;
+  --deepest: #080909;
+  --elev:    #151617;
+  --elev2:   #1A1C1E;
+  --text:    #F3F3EF;
+  --secondary: #ABABA6;
+  --muted:   #70716E;
+  --border:  #25272A;
+  --border-strong: #32353A;
+  --code:    var(--deepest);
+  --selbg:   rgba(255,255,255,.16);
+
+  --accent-ink: var(--p);
+  --on-accent:  #080909;
+  --danger-ink: var(--er);
+  --warn-ink:   var(--am);
+  --ok-ink:     var(--gr);
+
+  --youtint: #0c2a31;
+
+  --sh-menu:  0 6px 24px rgba(0,0,0,.55), 0 1px 3px rgba(0,0,0,.4);
+  --sh-modal: 0 22px 60px rgba(0,0,0,.65), 0 2px 10px rgba(0,0,0,.5);
 }
 
 * { box-sizing: border-box; }
@@ -3386,13 +3416,22 @@ button.tool-call-header:focus-visible {
  * brand color. (color-mix is widely supported; where it isn't, this rule is
  * dropped and the accent simply falls back to the brand hue above.) */
 @media (prefers-color-scheme: light) {
-  .path-card[data-path="ask"]      { --path-accent: color-mix(in srgb, var(--cyan)  55%, #000); }
-  .path-card[data-path="web"]      { --path-accent: color-mix(in srgb, var(--green) 55%, #000); }
-  .path-card[data-path="notebook"],
-  .path-card[data-path="pod"],
-  .path-card[data-path="vm"],
-  .path-card[data-path="app"]      { --path-accent: color-mix(in srgb, var(--amber) 50%, #000); }
+  :root:not([data-theme="dark"]) .path-card[data-path="ask"]      { --path-accent: color-mix(in srgb, var(--cyan)  55%, #000); }
+  :root:not([data-theme="dark"]) .path-card[data-path="web"]      { --path-accent: color-mix(in srgb, var(--green) 55%, #000); }
+  :root:not([data-theme="dark"]) .path-card[data-path="notebook"],
+  :root:not([data-theme="dark"]) .path-card[data-path="pod"],
+  :root:not([data-theme="dark"]) .path-card[data-path="vm"],
+  :root:not([data-theme="dark"]) .path-card[data-path="app"]      { --path-accent: color-mix(in srgb, var(--amber) 50%, #000); }
 }
+
+/* Forced light on a dark OS: the media query above doesn't match, so repeat the
+ * darkened accents under the explicit attribute selector. */
+:root[data-theme="light"] .path-card[data-path="ask"]      { --path-accent: color-mix(in srgb, var(--cyan)  55%, #000); }
+:root[data-theme="light"] .path-card[data-path="web"]      { --path-accent: color-mix(in srgb, var(--green) 55%, #000); }
+:root[data-theme="light"] .path-card[data-path="notebook"],
+:root[data-theme="light"] .path-card[data-path="pod"],
+:root[data-theme="light"] .path-card[data-path="vm"],
+:root[data-theme="light"] .path-card[data-path="app"]      { --path-accent: color-mix(in srgb, var(--amber) 50%, #000); }
 
 @media (prefers-reduced-motion: reduce) {
   /* no flicker, no type-in (the JS skips typing too) — final state at once */
@@ -3618,3 +3657,111 @@ button.tool-call-header:focus-visible {
 .ctx-msg-tool { font-size: 10px; color: var(--fg-muted); margin: 2px 0 2px 8px; }
 .ctx-msg-result { margin: 2px 0 2px 8px; }
 .ctx-msg-result.failed .ctx-msg-role { color: var(--danger); }
+
+/* --- SearchableSelect (model picker + settings selects) --- */
+.searchable-select {
+  position: relative;
+  display: inline-block;
+}
+.searchable-select-trigger {
+  font: inherit;
+  padding: 8px 32px 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background-color: var(--bg);
+  color: var(--fg);
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a8a8a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px;
+  text-align: left;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.searchable-select-trigger:focus { border-color: var(--accent); cursor: text; }
+.searchable-select-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+}
+.searchable-select-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  min-width: 220px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  z-index: 31;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.searchable-select-search {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.searchable-select-search:focus { border-color: var(--accent); }
+.searchable-select-list {
+  max-height: 240px;
+  overflow-y: auto;
+  margin-top: 4px;
+}
+.searchable-select-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 9px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.searchable-select-option:hover { background: var(--bg); }
+.searchable-select-option.is-selected {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.searchable-select-empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+/* Inside the chat model picker the control is a flex sibling of the label, so
+   it grows to fill the row instead of the default inline-block width. */
+.model-picker .searchable-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.model-picker .searchable-select-trigger {
+  font-size: 12px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+}

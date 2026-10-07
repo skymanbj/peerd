@@ -54,7 +54,7 @@ describe('provider settings request ordering', () => {
       // The host exists but the model was never downloaded, so nothing is usable:
       // the honest empty state, not a default the first turn could not serve.
       expect(root.querySelector('#provider')).toBe(null);
-      expect(root.textContent).toContain('Nothing is assumed');
+      expect(root.textContent).toContain('不做任何假设');
     } finally {
       m.mount(root, null);
       root.remove();
@@ -71,8 +71,8 @@ describe('provider settings request ordering', () => {
       const providerSelect = root.querySelector('#provider');
       if (!(providerSelect instanceof HTMLSelectElement)) throw new Error('provider select missing');
       expect(providerSelect.value).toBe('local-webgpu');
-      expect(root.textContent).toContain('Default model for new chats');
-      expect(root.textContent?.includes('Nothing is assumed')).toBe(false);
+      expect(root.textContent).toContain('新对话的默认模型');
+      expect(root.textContent?.includes('不做任何假设')).toBe(false);
     } finally {
       m.mount(root, null);
       root.remove();
@@ -106,16 +106,16 @@ describe('provider settings request ordering', () => {
       let providerSelect = root.querySelector('#provider');
       if (!(providerSelect instanceof HTMLSelectElement)) throw new Error('provider select missing');
       expect(providerSelect.value).toBe('ollama');
-      expect(root.textContent).toContain('Checking…');
-      expect(root.textContent?.includes('Nothing is assumed')).toBe(false);
+      expect(root.textContent).toContain('检查中…');
+      expect(root.textContent?.includes('不做任何假设')).toBe(false);
 
       probe.resolve({ ok: false, error: 'unreachable' });
       await settle();
       providerSelect = root.querySelector('#provider');
       if (!(providerSelect instanceof HTMLSelectElement)) throw new Error('provider select missing after probe');
       expect(providerSelect.value).toBe('ollama');
-      expect(root.textContent).toContain('Not reachable');
-      expect(root.textContent?.includes('Nothing is assumed')).toBe(false);
+      expect(root.textContent).toContain('无法访问');
+      expect(root.textContent?.includes('不做任何假设')).toBe(false);
     } finally {
       m.mount(root, null);
       root.remove();
@@ -146,9 +146,9 @@ describe('provider settings request ordering', () => {
       await settle();
       const runner = root.querySelector('#runner-model');
       if (!(runner instanceof HTMLInputElement)) throw new Error('runner model input missing');
-      expect(runner.placeholder).toBe('Automatic');
-      expect(root.textContent).toContain('use Local WebGPU when its model is installed');
-      expect(root.textContent).toContain('otherwise use claude-haiku on Anthropic');
+      expect(runner.placeholder).toBe('自动');
+      expect(root.textContent).toContain('当其模型已安装时使用本地 WebGPU');
+      expect(root.textContent).toContain('否则使用 claude-haiku');
     } finally {
       m.mount(root, null);
       root.remove();
@@ -218,7 +218,7 @@ describe('provider settings request ordering', () => {
       aProbe.resolve({ ok: false, error: 'unreachable' });
       await settle();
 
-      expect(root.textContent).toContain('Connected');
+      expect(root.textContent).toContain('已连接');
       expect(root.textContent).toContain('B Model');
       expect(root.textContent?.includes('A Model')).toBe(false);
       expect(seen.some((call) => call.type === 'models/options' && call.host === 'http://b:11434')).toBe(true);
@@ -261,7 +261,7 @@ describe('provider settings request ordering', () => {
     try {
       await settle();
       await settle();
-      const testButton = Array.from(root.querySelectorAll('button')).find((button) => button.textContent === 'Test');
+      const testButton = Array.from(root.querySelectorAll('button')).find((button) => button.textContent === '测试');
       if (!(testButton instanceof HTMLButtonElement)) throw new Error('Test button missing');
       testButton.click();
       await settle();
@@ -274,8 +274,8 @@ describe('provider settings request ordering', () => {
       await settle();
       oldExplicit.resolve({ ok: false, error: 'unreachable' });
       await settle();
-      expect(root.textContent).toContain('Connected');
-      expect(root.textContent?.includes('Couldn’t reach')).toBe(false);
+      expect(root.textContent).toContain('已连接');
+      expect(root.textContent?.includes('无法访问')).toBe(false);
     } finally {
       m.mount(root, null);
       root.remove();
@@ -318,7 +318,7 @@ describe('provider settings request ordering', () => {
       expect(initialProbeDone).toBe(true);
       testedHosts.length = 0;
       const hostInput = root.querySelector('#ollama-host');
-      const testButton = Array.from(root.querySelectorAll('button')).find((button) => button.textContent === 'Test');
+      const testButton = Array.from(root.querySelectorAll('button')).find((button) => button.textContent === '测试');
       if (!(hostInput instanceof HTMLInputElement) || !(testButton instanceof HTMLButtonElement)) {
         throw new Error('Ollama controls missing');
       }
@@ -376,8 +376,8 @@ describe('provider settings request ordering', () => {
         providers: [{ name: 'anthropic', label: 'Anthropic', defaultModel: 'claude', hasKey: false, keyless: false }],
       });
       await settle();
-      expect(root.textContent).toContain('Key saved');
-      expect(root.textContent?.includes('No key set')).toBe(false);
+      expect(root.textContent).toContain('密钥已保存');
+      expect(root.textContent?.includes('未设置密钥')).toBe(false);
     } finally {
       m.mount(root, null);
       root.remove();

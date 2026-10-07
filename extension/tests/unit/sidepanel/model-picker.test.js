@@ -69,8 +69,11 @@ describe('sidepanel.model-picker request ordering', () => {
         selected: 'peerd::new-a',
       });
       await flush();
-      expect(/** @type {HTMLSelectElement | null} */ (
-        root.querySelector('select.model-picker-select'))?.value).toBe('peerd::new-a');
+      /** The SearchableSelect trigger is an <input> whose value is the selected
+       *  option's LABEL; the option's value key lives in component state. */
+      const trigger = () => /** @type {HTMLInputElement | null} */ (
+        root.querySelector('input.searchable-select-trigger'));
+      expect(trigger()?.value).toBe('peerd · New A');
 
       oldARequest.resolve({
         ok: true,
@@ -81,9 +84,7 @@ describe('sidepanel.model-picker request ordering', () => {
         selected: 'peerd::old-a',
       });
       await flush();
-      expect(/** @type {HTMLSelectElement | null} */ (
-        root.querySelector('select.model-picker-select'))?.value).toBe('peerd::new-a');
-      expect(root.textContent?.includes('Old A')).toBe(false);
+      expect(trigger()?.value).toBe('peerd · New A');
 
       bRequest.resolve({
         ok: true,
@@ -94,6 +95,7 @@ describe('sidepanel.model-picker request ordering', () => {
         selected: 'anthropic::late-a',
       });
       await flush();
+      expect(trigger()?.value).toBe('peerd · New A');
       expect(root.textContent?.includes('Late A')).toBe(false);
     } finally {
       m.mount(root, null);

@@ -83,7 +83,7 @@ describe('options.activity — a declined tool call shows as failed (end-to-end)
     try {
       await settle();
       const text = root.textContent ?? '';
-      expect(text.includes('tool failed')).toBe(true);            // the danger label
+      expect(text.includes('工具失败')).toBe(true);            // the danger label
       expect(!!root.querySelector('.log-danger')).toBe(true);     // the danger dot
     } finally { unmount(); clearTools(); }
   });
@@ -105,11 +105,11 @@ describe('options.activity — a declined tool call shows as failed (end-to-end)
     try {
       await settle();
       const text = root.textContent ?? '';
-      expect(text).toContain('private network blocked');
-      expect(text).toContain('stopped after navigation');
-      expect(text).toContain('page loaded, not automated');
-      expect(text).toContain('tab reset');
-      expect(text).toContain('do not retry');
+      expect(text).toContain('私有网络已阻止');
+      expect(text).toContain('导航后已停止');
+      expect(text).toContain('页面已加载，未自动化');
+      expect(text).toContain('标签页已重置');
+      expect(text).toContain('请勿重试');
       expect(text.includes('127.0.0.1')).toBe(false);
     } finally { unmount(); }
   });
@@ -131,11 +131,11 @@ describe('options.activity — a declined tool call shows as failed (end-to-end)
     try {
       await settle();
       const text = root.textContent ?? '';
-      expect(text).toContain('sensitive site blocked');
-      expect(text).toContain('stopped after navigation');
-      expect(text).toContain('page loaded, not automated');
-      expect(text).toContain('tab reset not confirmed');
-      expect(text).toContain('do not retry');
+      expect(text).toContain('敏感站点已阻止');
+      expect(text).toContain('导航后已停止');
+      expect(text).toContain('页面已加载，未自动化');
+      expect(text).toContain('标签页重置未确认');
+      expect(text).toContain('请勿重试');
       expect(text.includes('accounts.example')).toBe(false);
     } finally { unmount(); }
   });
@@ -156,10 +156,10 @@ describe('options.activity — a declined tool call shows as failed (end-to-end)
     try {
       await settle();
       const text = root.textContent ?? '';
-      expect(text).toContain('child navigation control failed');
-      expect(text).toContain('child control not confirmed');
-      expect(text).toContain('network guard not confirmed');
-      expect(text).toContain('outcome not verified');
+      expect(text).toContain('子导航控制失败');
+      expect(text).toContain('子项控制未确认');
+      expect(text).toContain('网络防护未确认');
+      expect(text).toContain('结果未验证');
     } finally { unmount(); }
   });
 });

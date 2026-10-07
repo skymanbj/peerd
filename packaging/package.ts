@@ -166,11 +166,34 @@ export const packageArtifact = async (
   // -X strips platform extra fields; -@ takes the sorted entry list on stdin
   // (see normalizeStagingForZip — mtimes/modes/order are already normalized).
   const entries = normalizeStagingForZip(staging);
-  execFileSync('zip', ['-q', '-X', artifact, '-@'], {
-    cwd: staging,
-    input: entries.join('\n') + '\n',
-    env: { ...process.env, TZ: 'UTC' },
-  });
+  try {
+    execFileSync('zip', ['-q', '-X', artifact, '-@'], {
+      cwd: staging,
+      input: entries.join('\n') + '\n',
+      env: { ...process.env, TZ: 'UTC' },
+    });
+  } catch (err) {
+    // Windows fallback: a stock Windows box (and Git Bash) usually has no `zip`
+    // on PATH. PowerShell's ZipFile API cannot consume the `-@` entry list, so
+    // this path trades the byte-reproducible normalization above for producing a
+    // valid artifact at all — entry order and timestamps come from the
+    // filesystem. Release/CI still uses `zip`; this branch exists only so a
+    // local Windows `npm run package` yields an artifact instead of dying.
+    if (process.platform !== 'win32') throw err;
+    console.warn(
+      `zip unavailable — falling back to PowerShell ZipFile; artifact is NOT byte-reproducible: ${relative(REPO_ROOT, artifact)}`,
+    );
+    const psQuote = (p: string) => p.replace(/'/g, "''");
+    execFileSync(
+      'powershell',
+      [
+        '-NoProfile',
+        '-Command',
+        `Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory('${psQuote(staging)}', '${psQuote(artifact)}')`,
+      ],
+      { cwd: REPO_ROOT },
+    );
+  }
 
   console.log(`built ${relative(REPO_ROOT, artifact)} (${channel}/${browser} v${version})`);
 

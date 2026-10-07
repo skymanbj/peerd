@@ -135,7 +135,7 @@ describe('sidepanel.attachments', () => {
       input.dispatchEvent(new Event('change', { bubbles: true }));
       await until(() => root.querySelector('.attach-error'));
       expect(root.querySelector('.attach-chip')).toBeFalsy();
-      expect(need(root, '.attach-error').textContent).toContain('PDF or plain-text export');
+      expect(need(root, '.attach-error').textContent).toContain('此浏览器中不支持 office 和电子书转换');
       expect(need(root, '.attach-error').getAttribute('role')).toBe('alert');
       expect(need(root, '.attach-error').getAttribute('aria-live')).toBe('assertive');
     } finally { unmount(); }

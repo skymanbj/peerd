@@ -100,9 +100,9 @@ describe('home.contacts', () => {
       const names = [...root.querySelectorAll('.peerd-disc-name')].map((n) => n.textContent);
       expect(names.some((t) => t === 'Alice')).toBe(true);          // the saved overlay name
       // the live-only peer shows as an unnamed "peer …<short did>" (last 8 chars)
-      expect(root.textContent).toContain('peer LIVELIVE');
+      expect(root.textContent).toContain('对端 LIVELIVE');
       // its live status is rendered honestly
-      expect(root.textContent).toContain('direct · IPv6');
+      expect(root.textContent).toContain('直连 · IPv6');
     } finally { unmount(); }
   });
 
@@ -111,9 +111,9 @@ describe('home.contacts', () => {
     try {
       // Expand ALICE's row specifically (the live peer sorts first).
       const alice = rowWith(root, 'Alice');
-      clickText(alice, 'button', 'Activity');
+      clickText(alice, 'button', '活动');
       await flush();
-      expect(root.textContent).toContain('1 app installed from them');
+      expect(root.textContent).toContain('1 个应用已从此对端安装：');
       expect(root.textContent).toContain('Chess');
     } finally { unmount(); }
   });
@@ -123,7 +123,7 @@ describe('home.contacts', () => {
     const { root, unmount } = await mountView(send);
     try {
       // The live-only peer offers "Name"; the named one offers "Rename".
-      clickText(root, 'button', 'Name');
+      clickText(root, 'button', '命名');
       await flush();
       const input = need(root, '.contact-name-input', HTMLInputElement);
       expect(input).toBeTruthy();
@@ -144,7 +144,7 @@ describe('home.contacts', () => {
     });
     const { root, unmount } = await mountView(send);
     try {
-      expect(root.textContent).toContain('No known peers yet');
+      expect(root.textContent).toContain('暂无已知对端。');
     } finally { unmount(); }
   });
 });

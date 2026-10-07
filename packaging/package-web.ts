@@ -65,7 +65,7 @@ const stageDir = (dir: string): void => {
   cpSync(join(EXTENSION_DIR, dir), join(WEB_DIST, dir), {
     recursive: true,
     filter: (src) => {
-      const rel = relative(EXTENSION_DIR, src);
+      const rel = relative(EXTENSION_DIR, src).replaceAll('\\', '/');
       return rel === '' || !isPruned(rel);
     },
   });
@@ -108,7 +108,7 @@ const verifyStubValues = (): void => {
 // see (the import still resolves). Fail loudly instead.
 const assertNoShellCollisions = (): void => {
   const collisions = walk(WEB_SHELL_DIR)
-    .map((f) => relative(WEB_SHELL_DIR, f))
+    .map((f) => relative(WEB_SHELL_DIR, f).replaceAll('\\', '/'))
     .filter((rel) => basename(rel) !== '.DS_Store' && existsSync(join(WEB_DIST, rel)));
   if (collisions.length > 0) {
     throw new Error(
@@ -153,7 +153,9 @@ export const buildWebTarget = async (): Promise<void> => {
   // shell change rolls the SW cache name and invalidates staged modules.
   const hash = createHash('sha256');
   const files = walk(WEB_DIST)
-    .map((f) => relative(WEB_DIST, f))
+    // POSIX-normalize: these rels become the precache URL list ('/' + rel) and
+    // the buildId hash input — Windows backslashes would corrupt both.
+    .map((f) => relative(WEB_DIST, f).replaceAll('\\', '/'))
     .filter((rel) => rel !== 'sw.js' && rel !== 'build.json')
     .sort();
   for (const rel of files) { hash.update(rel); hash.update('\0'); hash.update(readFileSync(join(WEB_DIST, rel))); }
