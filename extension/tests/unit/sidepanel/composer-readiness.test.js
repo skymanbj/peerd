@@ -37,7 +37,7 @@ describe('session-aware composer readiness', () => {
       const textarea = mounted.root.querySelector('textarea');
       if (!(textarea instanceof HTMLTextAreaElement)) throw new Error('textarea missing');
       expect(textarea?.disabled).toBe(false);
-      expect(textarea?.placeholder).toBe('Message peerd…');
+      expect(textarea?.placeholder).toBe('给 peerd 发消息…');
       textarea.value = 'hello locally';
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
       m.redraw.sync?.();

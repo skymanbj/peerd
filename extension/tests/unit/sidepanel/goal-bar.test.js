@@ -48,8 +48,8 @@ describe('GoalBar (active goal run strip)', () => {
     try {
       const bar = root.querySelector('.goal-bar');
       expect(!!bar).toBe(true);
-      expect(root.querySelector('.goal-bar-label')?.textContent).toBe('Goal');
-      expect(root.querySelector('.goal-bar-meta')?.textContent).toBe('turn 3 / 40');
+      expect(root.querySelector('.goal-bar-label')?.textContent).toBe('目标');
+      expect(root.querySelector('.goal-bar-meta')?.textContent).toBe('轮次 3 / 40');
       expect(root.querySelector('.goal-bar-text')?.textContent).toBe('build a drum machine');
     } finally { unmount(); }
   });

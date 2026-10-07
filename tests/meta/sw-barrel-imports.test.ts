@@ -184,8 +184,13 @@ describe('service-worker ↔ peerd-runtime barrel link integrity', () => {
     // OpenAI-compatible adapters at boot, so peerd-provider/background.js now
     // re-exports custom-providers.js + adapters/openai-compat.js — a deliberate
     // +2 modules, measured at 460 / 4_739_912 B / 463_159 B entry.
+    // Chat rename (2026-10): session-mutations.js gained the `session/updateTitle`
+    // route (a small session-mutation verb, same file, no new module) — the
+    // reviewed measurement is now ~4_740_8xx B (LF). Budget carries modest
+    // headroom for the platform line-ending delta (Windows CRLF checkouts read
+    // a few hundred bytes higher than the LF CI baseline).
     expect(graph.size).toBeLessThanOrEqual(460);
-    expect(bytes).toBeLessThanOrEqual(4_740_000);
+    expect(bytes).toBeLessThanOrEqual(4_742_000);
     expect(statSync(entry).size).toBeLessThanOrEqual(464_000);
   });
 

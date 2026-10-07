@@ -35,15 +35,15 @@ describe('sidepanel site-client confirmation', () => {
       proposal, origins: ['https://shop.example'],
     });
     try {
-      expect(root.querySelector('h3')?.textContent).toBe('Confirm site client');
-      expect(root.querySelector('[aria-label="Proposed site-client code"]')?.textContent).toBe(proposal.body);
-      expect(root.querySelector('[aria-label="Proposed site-client endpoints"]')?.textContent).toBe('GET /api/orders/:id');
+      expect(root.querySelector('h3')?.textContent).toBe('确认站点客户端');
+      expect(root.querySelector('[aria-label="建议的站点客户端代码"]')?.textContent).toBe(proposal.body);
+      expect(root.querySelector('[aria-label="建议的站点客户端端点"]')?.textContent).toBe('GET /api/orders/:id');
       expect(root.textContent.includes(proposal.dossier.summary)).toBe(true);
-      expect(root.textContent.includes('a signed-in browser session was observed')).toBe(true);
-      expect(root.textContent.includes('learned from observed site requests')).toBe(true);
+      expect(root.textContent.includes('观察到已登录的浏览器会话')).toBe(true);
+      expect(root.textContent.includes('从观察到的站点请求中学习')).toBe(true);
       expect(root.textContent.includes('capture-cdp')).toBe(false);
       expect([...root.querySelectorAll('.peerd-modal-actions button')].map((button) => button.textContent))
-        .toEqual(['Reject', 'Save client']);
+        .toEqual(['拒绝', '保存客户端']);
     } finally { unmount(); }
   });
 
@@ -54,10 +54,10 @@ describe('sidepanel site-client confirmation', () => {
       origins: ['https://shop.example'],
     });
     try {
-      expect(root.querySelector('[aria-label="Site-client deletion"]')?.textContent.includes('deletes')).toBe(true);
-      expect(root.querySelector('[aria-label="Proposed site-client code"]')).toBe(null);
+      expect(root.querySelector('[aria-label="站点客户端删除"]')?.textContent.includes('删除')).toBe(true);
+      expect(root.querySelector('[aria-label="建议的站点客户端代码"]')).toBe(null);
       expect([...root.querySelectorAll('.peerd-modal-actions button')].map((button) => button.textContent))
-        .toEqual(['Reject', 'Delete client']);
+        .toEqual(['拒绝', '删除客户端']);
     } finally { unmount(); }
   });
 
@@ -73,10 +73,10 @@ describe('sidepanel site-client confirmation', () => {
       origins: ['https://shop.example'],
     });
     try {
-      expect(root.querySelector('[aria-label="Existing site-client code"]')?.textContent)
+      expect(root.querySelector('[aria-label="现有的站点客户端代码"]')?.textContent)
         .toBe('return { currentOrder: async () => null };');
-      expect(root.querySelector('[aria-label="Proposed site-client code"]')?.textContent).toBe(proposal.body);
-      expect(root.textContent.includes('Endpoints change by +1/-2.')).toBe(true);
+      expect(root.querySelector('[aria-label="建议的站点客户端代码"]')?.textContent).toBe(proposal.body);
+      expect(root.textContent.includes('端点变化 +1/-2')).toBe(true);
     } finally { unmount(); }
   });
 
@@ -97,7 +97,7 @@ describe('sidepanel site-client confirmation', () => {
       const actions = /** @type {HTMLElement} */ (root.querySelector('.peerd-modal-actions'));
       expect(modal.textContent.includes(endpoints[59]?.path ?? '')).toBe(true);
       expect([...actions.querySelectorAll('button')].map((button) => button.textContent))
-        .toEqual(['Reject', 'Save client']);
+        .toEqual(['拒绝', '保存客户端']);
     } finally { unmount(); }
   });
 

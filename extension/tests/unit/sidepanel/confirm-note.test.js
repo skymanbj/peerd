@@ -58,7 +58,7 @@ describe('sidepanel.confirm note (issue 242)', () => {
       const modal = /** @type {HTMLElement} */ (root.querySelector('.confirm-modal'));
       const lines = [...modal.querySelectorAll('p.muted')].map((p) => p.textContent);
       expect(lines.length).toBe(1);
-      expect(lines[0].startsWith('The agent wants to run')).toBe(true);
+      expect(lines[0].startsWith('代理要执行')).toBe(true);
     } finally { unmount(); }
   });
 
@@ -70,7 +70,7 @@ describe('sidepanel.confirm note (issue 242)', () => {
       // class (page_write has no dedicated noun → 'actions') and the true scope
       // (no origins on this prompt → the grant really is origin-blind).
       // textContent concatenates the verb and the scope line without a space.
-      expect(labels).toEqual(['Reject', 'Allow all actionsthis chat, any site', 'Allow once']);
+      expect(labels).toEqual(['拒绝', '允许所有操作此对话，任意站点', '仅本次允许']);
     } finally { unmount(); }
   });
 
@@ -86,14 +86,14 @@ describe('sidepanel.confirm note (issue 242)', () => {
     });
     try {
       const claim = /** @type {HTMLElement} */ (
-        root.querySelector('[aria-label="Unknown-outcome repeat approval"]')
+        root.querySelector('[aria-label="未知结果重复批准"]')
       );
       const values = [...claim.querySelectorAll('code')].map((node) => node.textContent);
       expect(values).toEqual([target, 'submit_payment']);
-      expect(claim.textContent.includes('Exact target')).toBe(true);
-      expect(claim.textContent.includes('Action')).toBe(true);
+      expect(claim.textContent.includes('确切目标')).toBe(true);
+      expect(claim.textContent.includes('操作')).toBe(true);
       const buttons = [...root.querySelectorAll('.peerd-modal-actions button')];
-      expect(buttons.map((button) => button.textContent)).toEqual(['Reject', 'Allow once']);
+      expect(buttons.map((button) => button.textContent)).toEqual(['拒绝', '仅本次允许']);
       expect(buttons[1].classList.contains('lifecycle-confirm-allow')).toBe(true);
     } finally { unmount(); }
   });
@@ -108,7 +108,7 @@ describe('sidepanel.confirm note (issue 242)', () => {
     const { root, unmount } = mount({ ...base, note: NOTE, ephemeral: true });
     try {
       const labels = [...root.querySelectorAll('.peerd-modal-actions button')].map((b) => b.textContent);
-      expect(labels).toEqual(['Reject', 'Allow once']);
+      expect(labels).toEqual(['拒绝', '仅本次允许']);
     } finally { unmount(); }
   });
 });

@@ -34,7 +34,7 @@ describe('options.behavior — settings rows', () => {
     try {
       expect(root.querySelectorAll('.set-row').length).toBe(11);
       const bands = [...root.querySelectorAll('.set-band-name')].map((e) => e.textContent);
-      expect(bands).toEqual(['Safety', 'Behavior', 'Experimental & diagnostics']);
+      expect(bands).toEqual(['安全', '行为', '实验性与诊断']);
     } finally { unmount(); }
   });
 
@@ -54,8 +54,8 @@ describe('options.behavior — settings rows', () => {
     const { root, unmount } = mount();
     try {
       const pills = [...root.querySelectorAll('.set-pill')].map((e) => e.textContent);
-      expect(pills.includes('ON')).toBe(true);
-      expect(pills.includes('OFF')).toBe(true);
+      expect(pills.includes('开')).toBe(true);
+      expect(pills.includes('关')).toBe(true);
       const sw = /** @type {HTMLElement} */ (root.querySelector('.set-toggle'));
       expect(sw.getAttribute('role')).toBe('switch');
       expect(sw.getAttribute('aria-checked')).toBe('false');   // confirmActions: false
@@ -79,8 +79,8 @@ describe('options.behavior — settings rows', () => {
     try {
       const safety = [...root.querySelectorAll('.set-band')].filter((b) => b.classList.contains('is-safety'));
       expect(safety.length).toBe(1);
-      expect(safety[0].textContent).toContain('Confirm before actions');
-      expect(safety[0].textContent).toContain('Confirm before sending data out');
+      expect(safety[0].textContent).toContain('操作前确认');
+      expect(safety[0].textContent).toContain('确认发送数据前询问');
     } finally { unmount(); }
   });
 

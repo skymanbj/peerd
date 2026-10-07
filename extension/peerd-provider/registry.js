@@ -51,6 +51,9 @@ import { UnknownProviderError } from './errors.js';
  * @property {string} [defaultRunnerModel]
  * @property {string | null} [vaultSecretName]
  * @property {boolean} [keyless]
+ * @property {string} [apiFormat]   wire format for custom OpenAI-compatible providers ('openai' | 'anthropic')
+ * @property {boolean} [custom]     true when dynamically registered by the user (not a shipped adapter)
+ * @property {string} [baseUrl]     origin + optional path for custom providers
  * @property {(args: any) => AsyncGenerator<ProviderEvent>} call
  * @property {(deps: any) => Promise<Array<{ model: string, label: string }>>} [listModels]
  * @property {(args: any) => Promise<number | null>} [contextWindow]

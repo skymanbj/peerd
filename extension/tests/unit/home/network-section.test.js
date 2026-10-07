@@ -75,7 +75,7 @@ describe('home.network', () => {
   it('offline: shows the Start the network button', async () => {
     const { root, unmount } = await mountView(makeSend());
     try {
-      expect(byText(root, '.peerd-net-btn', 'Start the network')).toBeTruthy();
+      expect(byText(root, '.peerd-net-btn', '启动网络')).toBeTruthy();
     } finally { unmount(); }
   });
 
@@ -94,15 +94,15 @@ describe('home.network', () => {
     });
     const { root, unmount } = await mountView(send);
     try {
-      clickText(root, '.peerd-net-btn', 'Start the network');
+      clickText(root, '.peerd-net-btn', '启动网络');
       await flush();
       // wiring fired
       expect(send.calls.some((c) => c.type === 'dweb/base/start')).toBe(true);
       // the failure is SURFACED, not swallowed
       expect(root.textContent).toContain('websocket error');
       // and the button is usable again (not stuck on "Starting…")
-      expect(byText(root, '.peerd-net-btn', 'Starting…')).toBeFalsy();
-      expect(byText(root, '.peerd-net-btn', 'Start the network')).toBeTruthy();
+      expect(byText(root, '.peerd-net-btn', '启动中…')).toBeFalsy();
+      expect(byText(root, '.peerd-net-btn', '启动网络')).toBeTruthy();
     } finally { unmount(); }
   });
 
@@ -114,13 +114,13 @@ describe('home.network', () => {
     });
     const { root, unmount } = await mountView(send);
     try {
-      clickText(root, '.peerd-net-btn', 'Start the network');
+      clickText(root, '.peerd-net-btn', '启动网络');
       await flush();
       expect(send.calls.some((c) => c.type === 'dweb/base/start')).toBe(true);
       // left the offline view for the live one (facts row present, no Start btn)
       expect(root.querySelector('.peerd-net-facts')).toBeTruthy();
-      expect(root.textContent).toContain('Lobby');
-      expect(byText(root, '.peerd-net-btn', 'Start the network')).toBeFalsy();
+      expect(root.textContent).toContain('大厅');
+      expect(byText(root, '.peerd-net-btn', '启动网络')).toBeFalsy();
     } finally { unmount(); }
   });
 });

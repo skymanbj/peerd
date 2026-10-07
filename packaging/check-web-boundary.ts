@@ -68,7 +68,9 @@ export const checkWebBoundary = async (): Promise<void> => {
   await init;
   const f: Findings = { violations: [], warnings: [] };
 
-  const allFiles = walk(WEB_DIST).map((p) => relative(WEB_DIST, p));
+  // POSIX-normalize: these rels drive the vendor/ prefix filter and the
+  // per-extension branch — Windows backslashes would misclassify every entry.
+  const allFiles = walk(WEB_DIST).map((p) => relative(WEB_DIST, p).replaceAll('\\', '/'));
   const stubExports = new Map<string, Set<string>>(); // staged rel path -> exported names
   for (const rel of WEB_STUB_PATHS) {
     const [, exports] = parse(readFileSync(join(TEMPLATES_DIR, WEB_SWAPS[rel]), 'utf8'));

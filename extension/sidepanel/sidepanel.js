@@ -25,6 +25,23 @@ import { eventBelongsToSidepanelWindow, focusBrowserTab } from './tab-context.js
 /** @type {ChatState} */
 let currentState = INITIAL_STATE;
 
+// --- Theme application & sync (auto | light | dark) -------------------------
+// Mirrors home.js: `data-theme` on <html> drives the CSS; 'auto' clears it so
+// prefers-color-scheme wins. The `storage` event is the cross-page channel —
+// it fires in this page when home.js (or options) changes the theme.
+/** @param {string | null} theme */
+const applyTheme = (theme) => {
+  if (theme === 'dark' || theme === 'light') {
+    document.documentElement.setAttribute('data-theme', theme);
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+};
+try { applyTheme(localStorage.getItem('theme') || 'auto'); } catch { applyTheme('auto'); }
+window.addEventListener('storage', (e) => {
+  if (e.key === 'theme') applyTheme(e.newValue || 'auto');
+});
+
 // Long-lived port to the SW. We keep `port` rebindable so we can
 // reconnect after a SW restart (extension reload, 30s-idle timeout
 // before the offscreen keepalive spawns, browser crash recovery, ...).

@@ -45,8 +45,8 @@ describe('ActorFabric', () => {
       expect(view.root.querySelectorAll('.actor-fabric-node.is-root').length).toBe(1);
       expect(view.root.querySelectorAll('.actor-fabric-node.is-bound').length).toBe(1);
       expect(view.root.querySelectorAll('.actor-fabric-node.is-subactor').length).toBe(1);
-      expect(view.root.querySelector('.actor-fabric-working')?.textContent).toBe('2 isolated actors working');
-      expect(view.root.querySelector('.actor-fabric-node.is-root .actor-fabric-boundary-chip')?.textContent).toBe('main context');
+      expect(view.root.querySelector('.actor-fabric-working')?.textContent).toBe('2 个隔离参与者正在工作');
+      expect(view.root.querySelector('.actor-fabric-node.is-root .actor-fabric-boundary-chip')?.textContent).toBe('主上下文');
     } finally { view.unmount(); }
   });
 
@@ -68,10 +68,10 @@ describe('ActorFabric', () => {
       node.click();
       m.redraw.sync();
       expect(node.getAttribute('aria-pressed')).toBe('true');
-      expect(view.root.querySelector('.actor-fabric-facts')?.textContent).toContain('one origin · fetch_url');
-      expect(view.root.querySelector('.actor-fabric-facts')?.textContent).toContain('fenced reply');
+      expect(view.root.querySelector('.actor-fabric-facts')?.textContent).toContain('一个来源 · fetch_url');
+      expect(view.root.querySelector('.actor-fabric-facts')?.textContent).toContain('围栏回复');
       expect(view.root.querySelector('.actor-fabric-detail')?.getAttribute('role')).toBe('region');
-      expect(view.root.querySelector('.actor-fabric-announcer')?.textContent).toContain('details shown');
+      expect(view.root.querySelector('.actor-fabric-announcer')?.textContent).toContain('已显示');
     } finally { view.unmount(); }
   });
 

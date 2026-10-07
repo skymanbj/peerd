@@ -22,10 +22,6 @@
   background: var(--bg-elev);
 }
 .home-rail-mark { padding: 4px 8px 8px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-/* The home variant of the preview badge sits flush-left under the wordmark (the
-   shared .channel-badge centers itself + adds a left margin for the inline
-   side-panel layout — undo both here so it aligns with the wordmark). */
-.channel-badge--in { margin-left: 0; align-self: flex-start; }
 
 .home-nav { display: flex; flex-direction: column; gap: 16px; margin-top: 12px; }
 .home-nav-group,
@@ -132,6 +128,18 @@
   flex: 1;
   min-height: 0;
   padding: 4px 16px 16px;
+  max-width: 960px;
+}
+
+/* Widen the empty state starter cards menu on the home page to match the wider container */
+.home-content--chat .empty-state--home {
+  width: min(100%, 800px);
+}
+
+/* Add full border and rounded corners to the model picker on the home page */
+.home-content--chat .model-picker {
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
 /* --- Actors: the instance-wide, full-screen runtime map ------------------ *
@@ -741,19 +749,46 @@
 .chat-list-item-meta { flex: none; color: var(--fg-muted); font-size: 11px; }
 .chat-list-empty { padding: 10px 11px; font-size: 13px; }
 
-/* Delete affordance: a 3-dot revealed on row hover that turns into a red trash. */
+/* Delete & rename affordances revealed on row hover. */
+.chat-item-rename {
+  position: absolute; right: 28px; top: 50%; transform: translateY(-50%);
+  opacity: 0;
+  background: none; border: none; cursor: pointer;
+  font-size: 11px; line-height: 1; padding: 3px 5px; border-radius: 5px;
+  color: var(--fg-muted);
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+.chat-item-rename::before { content: '✏️'; }
+.chat-item-rename:hover { color: var(--fg); background: var(--bg-elev); }
+
 .chat-item-del {
   position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
   opacity: 0;
   background: none; border: none; cursor: pointer;
-  font-size: 13px; line-height: 1; padding: 4px 6px; border-radius: 5px;
+  font-size: 11px; line-height: 1; padding: 3px 5px; border-radius: 5px;
   color: var(--fg-muted);
+  transition: opacity 0.15s ease, color 0.15s ease;
 }
-.chat-item-del::before { content: '⋯'; }
-.chat-list-item:hover .chat-item-del { opacity: 1; }
-.chat-list-item:hover .chat-list-item-meta { opacity: 0; }   /* make room for the trash */
+.chat-item-del::before { content: '🗑️'; }
 .chat-item-del:hover { color: var(--danger); background: var(--bg-elev); }
-.chat-item-del:hover::before { content: '🗑'; }
+
+.chat-list-item:hover .chat-item-rename,
+.chat-list-item:hover .chat-item-del { opacity: 1; }
+.chat-list-item:hover .chat-list-item-meta { opacity: 0; }   /* make room for the icons */
+
+/* Inline rename box — replaces the title while editing. */
+.chat-item-edit-input {
+  flex: 1;
+  font-size: 12px;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  outline: none;
+  min-width: 0;
+  margin-right: 24px; /* leave room for meta/buttons */
+}
 
 /* "Reverse-type" deletion — mirrors the wordmark's self-delete (wmUnType): the
    title BACKSPACES away right→left in stepped, terminal fashion (NOT a fade),
@@ -762,6 +797,7 @@
 .chat-list-item.is-deleting { animation: chat-del-row 130ms ease 190ms forwards; pointer-events: none; overflow: hidden; }
 .chat-list-item.is-deleting .chat-list-item-title { animation: chat-del-text 190ms steps(16, end) forwards; }
 .chat-list-item.is-deleting .chat-list-item-meta,
+.chat-list-item.is-deleting .chat-item-rename,
 .chat-list-item.is-deleting .chat-item-del { visibility: hidden; }
 @keyframes chat-del-text { from { clip-path: inset(0 0 0 0); } to { clip-path: inset(0 100% 0 0); } }
 @keyframes chat-del-row {

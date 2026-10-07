@@ -40,6 +40,26 @@ export const makeSessionMutationRoutes = (deps) => {
       return { ok: true, model: next };
     },
 
+    // Rename a chat. The title is the only user-facing label a session carries
+    // in the recent-chats rail, so this is a plain record mutation + a state
+    // push; the home rail re-renders from the pushed snapshot.
+    'session/updateTitle': async ({ sessionId, title }) => {
+      if (vault.isLocked()) return { ok: false, error: 'locked' };
+      if (typeof title !== 'string') return { ok: false, error: 'invalid-title' };
+      const nextTitle = title.trim().slice(0, 100);
+      try {
+        await sessions.update(sessionId, { title: nextTitle });
+        if (sessionState.current()?.sessionId === sessionId) {
+          sessionState.set({ ...sessionState.current(), title: nextTitle });
+        }
+        pushState();
+        return { ok: true, title: nextTitle };
+      } catch (e) {
+        if (e instanceof SessionNotFoundError) return { ok: false, error: 'session-not-found' };
+        throw e;
+      }
+    },
+
     'session/reset': async () => {
       // why read BEFORE delete: "new chat" is a switch-away from the
       // current session — one of auto-memory's two lifecycle seams.

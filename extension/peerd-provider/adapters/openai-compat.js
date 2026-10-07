@@ -56,7 +56,9 @@ const MAX_BACKOFF_MS = 60_000;
 export const makeOpenAiCompatAdapter = ({ name, label, baseUrl, vaultSecretName, defaultModel, apiFormat = 'openai' }) => {
   const origin = baseUrl.replace(/\/+$/, '');
   const isAnthropicFormat = apiFormat === 'anthropic';
+  /** @type {string} */
   let ENDPOINT;
+  /** @type {string} */
   let MODELS_ENDPOINT;
   try {
     const u = new URL(origin);
@@ -87,6 +89,7 @@ export const makeOpenAiCompatAdapter = ({ name, label, baseUrl, vaultSecretName,
    * @param {string} [args.model]
    * @param {number} [args.maxTokens]
    * @param {ReadonlyArray<{ name: string, description: string, schema: object }>} [args.tools]
+   * @param {any} [args.reasoning]  Anthropic-style signed thinking blocks; forwarded only in the anthropic wire format.
    * @param {(name: string) => Promise<string | null>} args.getSecret
    * @param {(resource: string | URL | Request, init?: RequestInit) => Promise<Response>} args.safeFetch
    * @param {AbortSignal} [args.signal]

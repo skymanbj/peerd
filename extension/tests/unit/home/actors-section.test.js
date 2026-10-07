@@ -52,9 +52,9 @@ describe('home.actors', () => {
       expect(root.querySelectorAll('.actor-space-node').length).toBe(3);
       const stats = root.querySelectorAll('.actor-space-stat');
       expect(stats[0].querySelector('strong')?.textContent).toBe('1');
-      expect(stats[0].querySelector('span')?.textContent).toBe('orchestrator');
+      expect(stats[0].querySelector('span')?.textContent).toBe('编排器');
       expect(stats[1].querySelector('strong')?.textContent).toBe('2');
-      expect(stats[1].querySelector('span')?.textContent).toBe('isolated actors');
+      expect(stats[1].querySelector('span')?.textContent).toBe('隔离参与者');
       expect(root.querySelector('.actor-space-node.is-bound')).toBeTruthy();
       expect(root.querySelector('.actor-space-node.is-subactor')).toBeTruthy();
 
@@ -62,11 +62,11 @@ describe('home.actors', () => {
       m.redraw.sync();
       const selected = /** @type {HTMLButtonElement} */ (root.querySelector('.actor-space-node.is-bound'));
       const panel = root.querySelector('.actor-space-inspector');
-      expect(panel?.textContent).toContain('one web tab · read_page');
-      expect(root.querySelector('.actor-space-inspector')?.textContent).toContain('Dedicated keyless worker');
+      expect(panel?.textContent).toContain('一个网页标签页 · read_page');
+      expect(root.querySelector('.actor-space-inspector')?.textContent).toContain('专用的无密钥工作器');
       expect(selected.getAttribute('aria-expanded')).toBe('true');
       expect(selected.getAttribute('aria-controls')).toBe(panel?.id);
-      expect(root.querySelector('[aria-live="polite"]')?.textContent).toContain('details shown');
+      expect(root.querySelector('[aria-live="polite"]')?.textContent).toContain('详情已显示');
 
       selected.focus();
       /** @type {HTMLButtonElement} */ (root.querySelector('.actor-space-inspector-close')).click();
@@ -100,17 +100,17 @@ describe('home.actors', () => {
     await flush();
     try {
       const destination = /** @type {HTMLButtonElement} */ (root.querySelector('.actor-space-open-chat'));
-      expect(destination.textContent).toBe('Current in side panel');
+      expect(destination.textContent).toBe('当前在侧面板');
       expect(destination.disabled).toBe(true);
 
       const refresh = /** @type {HTMLButtonElement} */ (root.querySelector('.actor-space-refresh'));
       refresh.click();
       m.redraw.sync();
-      expect(refresh.textContent).toBe('Refreshing…');
-      expect(root.querySelector('[aria-live="polite"]')?.textContent).toContain('Refreshing actor activity');
+      expect(refresh.textContent).toBe('刷新中…');
+      expect(root.querySelector('[aria-live="polite"]')?.textContent).toContain('正在刷新参与者活动');
       finishRefresh(OVERVIEW);
       await flush();
-      expect(root.querySelector('[aria-live="polite"]')?.textContent).toContain('Actor activity refreshed');
+      expect(root.querySelector('[aria-live="polite"]')?.textContent).toContain('参与者活动已刷新');
     } finally {
       m.mount(root, null);
       root.remove();
@@ -132,7 +132,7 @@ describe('home.actors', () => {
       await flush();
       await new Promise((resolve) => requestAnimationFrame(resolve));
       expect(document.activeElement).toBe(root.querySelector('.actor-space-refresh'));
-      expect(root.querySelector('[aria-live="polite"]')?.textContent).toContain('Actor finished');
+      expect(root.querySelector('[aria-live="polite"]')?.textContent).toContain('参与者已结束');
     } finally {
       m.mount(root, null);
       root.remove();
@@ -147,8 +147,8 @@ describe('home.actors', () => {
     }) });
     await flush();
     try {
-      expect(root.querySelector('.actor-space-empty')?.textContent).toContain('The instance is quiet');
-      expect(root.textContent).toContain('Every active orchestrator');
+      expect(root.querySelector('.actor-space-empty')?.textContent).toContain('实例很安静');
+      expect(root.textContent).toContain('每个活跃的编排器');
     } finally {
       m.mount(root, null);
       root.remove();

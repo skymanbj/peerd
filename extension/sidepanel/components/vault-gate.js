@@ -274,6 +274,9 @@ const ERROR_MESSAGES = {
  * @property {boolean} showPassphrase
  * @property {boolean} forcePassphrase
  * @property {CapabilityProbe|null} probe
+ * @property {(() => Promise<void>)|null} unlockWithPasskey  wired by `view`
+ *   (the handler closes over view-local state); `oncreate` reads it for the
+ *   opportunistic auto-raise. Null until the first render.
  */
 
 /** @typedef {{ state: VaultGateState, attrs: { state: ChatState, send: Send } }} VaultGateVnode */
@@ -303,10 +306,29 @@ export const VaultGate = {
     // before a human can click); the UI renders the generic single
     // passkey button meanwhile, which is the legacy behavior.
     vnode.state.probe = null;
+    vnode.state.unlockWithPasskey = null;
     probeWebAuthnCapabilities().then((p) => {
       vnode.state.probe = p;
       m.redraw();
     }).catch(() => { /* keep legacy generic button */ });
+  },
+
+  // Opportunistically auto-raise the passkey prompt ~400ms after the gate
+  // mounts on a LOCKED vault with a passkey enrolled — saves the user the
+  // extra click. Deliberately deferred: the capability probe and first paint
+  // must settle first, and a 400ms beat lets a user who meant to reach for the
+  // passphrase link do so without a WebAuthn prompt fighting them. `view` runs
+  // before `oncreate` on mount, so `ui.unlockWithPasskey` is already wired.
+  /** @param {VaultGateVnode} vnode */
+  oncreate(vnode) {
+    setTimeout(() => {
+      const isLocked = !!vnode.attrs.state.vault?.locked;
+      const prfEnrolled = !!vnode.attrs.state.vault?.prfEnrolled;
+      const webauthnAvailable = isWebAuthnAvailable();
+      if (isLocked && prfEnrolled && webauthnAvailable && !vnode.state.showPassphrase) {
+        vnode.state.unlockWithPasskey?.().catch(() => {});
+      }
+    }, 400);
   },
 
   /** @param {VaultGateVnode} vnode */
@@ -509,6 +531,9 @@ export const VaultGate = {
         m.redraw();
       }
     };
+    // Hand the handler to `oncreate` (which fires after this first render) so
+    // the gate can opportunistically raise the prompt on its own.
+    ui.unlockWithPasskey = unlockWithPasskey;
 
     /** @param {Event} [e] */
     const unlockWithPassphrase = async (e) => {
@@ -588,11 +613,12 @@ export const VaultGate = {
               onclick: () => setupWithPasskey(flavor),
             }, !backendReady ? '正在准备安全设置…'
               : ui.busy ? passkeyBusyLabel : buttonLabel(flavor, i === 0))),
-            m('button.linklike', {
+            m('button.secondary', {
               type: 'button',
               disabled: ui.busy || !backendReady,
+              style: 'margin-top: 8px;',
               onclick: () => { ui.forcePassphrase = true; ui.error = null; ui.errorKind = 'neutral'; ui.floorViolated = false; m.redraw(); },
-            }, '改用密码短语'),
+            }, '改用普通密码创建（无 Windows Hello 推荐）'),
           ]),
           // why "recent" and no version trivia: PRF support via Windows
           // Hello depends on OS plumbing that older Windows lacks; the

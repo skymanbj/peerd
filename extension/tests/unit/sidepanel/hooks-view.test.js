@@ -140,14 +140,14 @@ describe('sidepanel.hooks-view', () => {
         const text = root.textContent;
         expect(text).toContain('egress-allowlist');
         expect(text).toContain('block-secrets');
-        expect(text).toContain('built-in');
-        expect(text).toContain('user');
+        expect(text).toContain('内置');
+        expect(text).toContain('用户');
         // The user hook's tool-name match renders.
         expect(text).toContain('type');
         // Phase badges exist for both events.
         const badges = [...root.querySelectorAll('.hook-phase')].map((b) => b.textContent);
-        expect(badges).toContain('pre');
-        expect(badges).toContain('post');
+        expect(badges).toContain('前置');
+        expect(badges).toContain('后置');
       } finally { unmount(); }
     });
 
@@ -155,13 +155,13 @@ describe('sidepanel.hooks-view', () => {
       const { root, unmount } = await mountView(makeSend());
       try {
         const egress = rowWith(root, 'egress-allowlist');
-        expect(egress.querySelector('.hook-lock')?.textContent).toBe('always on');
+        expect(egress.querySelector('.hook-lock')?.textContent).toBe('始终开启');
         // No toggle, no remove for a built-in.
         expect(egress.querySelector('input[type="checkbox"]')).toBe(null);
         expect(egress.querySelector('.hook-x')).toBe(null);
         // The reason is visible in the row (doc line) AND on the control.
         expect(egress.textContent).toContain('always-on egress floor');
-        expect(need(egress, '.hook-lock').title).toContain('safety floor');
+        expect(need(egress, '.hook-lock').title).toContain('安全底线');
       } finally { unmount(); }
     });
 
@@ -184,7 +184,7 @@ describe('sidepanel.hooks-view', () => {
       const send = makeSend();
       const { root, unmount } = await mountView(send);
       try {
-        const cb = need(root, 'input[aria-label="Enable block-secrets"]', HTMLInputElement);
+        const cb = need(root, 'input[aria-label="启用 block-secrets"]', HTMLInputElement);
         cb.checked = false;
         cb.dispatchEvent(new Event('change'));
         await flush();
@@ -199,11 +199,11 @@ describe('sidepanel.hooks-view', () => {
       const send = makeSend();
       const { root, unmount } = await mountView(send);
       try {
-        need(root, 'button[aria-label="Remove block-secrets"]').click();
+        need(root, 'button[aria-label="移除 block-secrets"]').click();
         await flush();
         // First click arms the confirm — nothing dispatched yet.
         expect(send.calls.some((c) => c.type === 'hooks/remove')).toBe(false);
-        button(root, 'Remove?').click();
+        button(root, '移除？').click();
         await flush();
         const remove = send.calls.find((c) => c.type === 'hooks/remove');
         expect(remove).toEqual({ type: 'hooks/remove', id: 'block-secrets' });
@@ -214,7 +214,7 @@ describe('sidepanel.hooks-view', () => {
       const send = makeSend();
       const { root, unmount } = await mountView(send);
       try {
-        button(root, 'Add hook…').click();
+        button(root, '添加钩子…').click();
         await flush();
         const editor = need(root, '.hook-add-editor', HTMLTextAreaElement);
         editor.value = '---\nid: x\nevent: pre-tool-use\n---\n';
@@ -234,7 +234,7 @@ describe('sidepanel.hooks-view', () => {
       });
       const { root, unmount } = await mountView(send);
       try {
-        button(root, 'Add hook…').click();
+        button(root, '添加钩子…').click();
         await flush();
         const editor = need(root, '.hook-add-editor', HTMLTextAreaElement);
         editor.value = '---\nid: x\nevent: nope\n---\n';

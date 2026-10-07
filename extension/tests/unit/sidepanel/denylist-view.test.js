@@ -125,13 +125,13 @@ describe('sidepanel.denylist-view', () => {
         expect(need(root, '.denylist-item.is-user').textContent).toBe('evil.example');
         expect(need(root, '.denylist-item.is-disabled').textContent).toBe('*.fidelity.com');
         // Seed rows arm a DISABLE; the user row arms a REMOVE.
-        expect(root.querySelector('button[aria-label="Disable chase.com"]')).toBeTruthy();
-        expect(root.querySelector('button[aria-label="Remove evil.example"]')).toBeTruthy();
-        expect(root.querySelector('button[aria-label="Remove chase.com"]')).toBe(null);
+        expect(root.querySelector('button[aria-label="禁用 chase.com"]')).toBeTruthy();
+        expect(root.querySelector('button[aria-label="移除 evil.example"]')).toBeTruthy();
+        expect(root.querySelector('button[aria-label="移除 chase.com"]')).toBe(null);
         // The disabled seed offers the way back.
-        expect(root.querySelector('button[aria-label="Re-enable *.fidelity.com"]')).toBeTruthy();
+        expect(root.querySelector('button[aria-label="重新启用 *.fidelity.com"]')).toBeTruthy();
         // Unfiltered count shows the full population (3 enforced + 1 disabled).
-        expect(need(root, '.denylist-count').textContent).toBe('4 patterns');
+        expect(need(root, '.denylist-count').textContent).toBe('4 个模式');
       } finally { unmount(); }
     });
   });
@@ -142,16 +142,16 @@ describe('sidepanel.denylist-view', () => {
       try {
         await setSearch(root, 'CHASE');
         expect(chipTexts(root)).toEqual(['chase.com', '*.chase.com']);
-        expect(need(root, '.denylist-count').textContent).toBe('2 of 4');
+        expect(need(root, '.denylist-count').textContent).toBe('2 / 4');
 
         // The filter spans the disabled section too.
         await setSearch(root, 'fidelity');
         expect(chipTexts(root)).toEqual(['*.fidelity.com']);
-        expect(need(root, '.denylist-count').textContent).toBe('1 of 4');
+        expect(need(root, '.denylist-count').textContent).toBe('1 / 4');
 
         await setSearch(root, 'zzz');
         expect(chipTexts(root).length).toBe(0);
-        expect(root.textContent).toContain('No patterns match the search.');
+        expect(root.textContent).toContain('没有匹配搜索的模式。');
       } finally { unmount(); }
     });
 
@@ -159,11 +159,11 @@ describe('sidepanel.denylist-view', () => {
       const { root, unmount } = await mountView(makeSend());
       try {
         await setSearch(root, 'chase');
-        need(root, 'button[aria-label="Clear search"]').click();
+        need(root, 'button[aria-label="清除搜索"]').click();
         await flush();
         expect(chipTexts(root).length).toBe(4);
         expect(need(root, '.denylist-search-input', HTMLInputElement).value).toBe('');
-        expect(root.querySelector('button[aria-label="Clear search"]')).toBe(null);
+        expect(root.querySelector('button[aria-label="清除搜索"]')).toBe(null);
       } finally { unmount(); }
     });
   });
@@ -173,15 +173,15 @@ describe('sidepanel.denylist-view', () => {
       const send = makeSend();
       const { root, unmount } = await mountView(send);
       try {
-        need(root, 'button[aria-label="Remove evil.example"]').click();
+        need(root, 'button[aria-label="移除 evil.example"]').click();
         await flush();
         // Armed, not dispatched — the consequence copy is on screen.
         expect(send.calls.some((c) => c.type === 'denylist/remove')).toBe(false);
         const strip = need(root, '.denylist-item-row.is-arming');
-        expect(strip.textContent).toContain('peerd will be able to act on evil.example again');
-        expect(need(strip, '.denylist-badge').textContent).toBe('user');
+        expect(strip.textContent).toContain('peerd 将能够再次对 evil.example 执行操作。');
+        expect(need(strip, '.denylist-badge').textContent).toBe('用户');
 
-        button(strip, 'Remove?').click();
+        button(strip, '移除?').click();
         await flush();
         const remove = send.calls.find((c) => c.type === 'denylist/remove');
         expect(remove).toEqual({ type: 'denylist/remove', pattern: 'evil.example' });
@@ -194,19 +194,19 @@ describe('sidepanel.denylist-view', () => {
       const send = makeSend();
       const { root, unmount } = await mountView(send);
       try {
-        need(root, 'button[aria-label="Disable chase.com"]').click();
+        need(root, 'button[aria-label="禁用 chase.com"]').click();
         await flush();
         const strip = need(root, '.denylist-item-row.is-arming');
-        expect(need(strip, '.denylist-badge').textContent).toBe('built-in');
-        expect(strip.textContent).toContain('peerd will be able to act on chase.com again');
-        expect(strip.textContent).toContain("can't be deleted");
+        expect(need(strip, '.denylist-badge').textContent).toBe('内置');
+        expect(strip.textContent).toContain('peerd 将能够再次对 chase.com 执行操作。');
+        expect(strip.textContent).toContain('内置模式无法删除');
         const verbs = [...strip.querySelectorAll('button')].map((b) => b.textContent);
-        expect(verbs).toContain('Disable?');
+        expect(verbs).toContain('禁用?');
         // why not expect(...).not: the in-browser framework keeps its
         // matcher set minimal — no negation chain.
-        expect(verbs.includes('Remove?')).toBe(false);
+        expect(verbs.includes('移除?')).toBe(false);
 
-        button(strip, 'Disable?').click();
+        button(strip, '禁用?').click();
         await flush();
         // Disable rides the same overlay route; the SW decides seed-vs-user.
         expect(send.calls.find((c) => c.type === 'denylist/remove'))
@@ -218,15 +218,15 @@ describe('sidepanel.denylist-view', () => {
       const send = makeSend();
       const { root, unmount } = await mountView(send);
       try {
-        need(root, 'button[aria-label="Disable chase.com"]').click();
+        need(root, 'button[aria-label="禁用 chase.com"]').click();
         await flush();
         const strip = need(root, '.denylist-item-row.is-arming');
-        need(strip, 'button[aria-label="Cancel"]').click();
+        need(strip, 'button[aria-label="取消"]').click();
         await flush();
         expect(root.querySelector('.denylist-item-row.is-arming')).toBe(null);
         expect(send.calls.some((c) => c.type === 'denylist/remove')).toBe(false);
         // The row's arm control is back.
-        expect(root.querySelector('button[aria-label="Disable chase.com"]')).toBeTruthy();
+        expect(root.querySelector('button[aria-label="禁用 chase.com"]')).toBeTruthy();
       } finally { unmount(); }
     });
   });
@@ -262,7 +262,7 @@ describe('sidepanel.denylist-view', () => {
           new Event('submit', { bubbles: true, cancelable: true }),
         );
         await flush();
-        expect(need(root, '.key-msg.err').textContent).toContain('Not a valid pattern');
+        expect(need(root, '.key-msg.err').textContent).toContain('模式无效');
         expect(need(root, '.denylist-input', HTMLInputElement).value).toBe('not a pattern');
       } finally { unmount(); }
     });
@@ -271,7 +271,7 @@ describe('sidepanel.denylist-view', () => {
       const send = makeSend();
       const { root, unmount } = await mountView(send);
       try {
-        need(root, 'button[aria-label="Re-enable *.fidelity.com"]').click();
+        need(root, 'button[aria-label="重新启用 *.fidelity.com"]').click();
         await flush();
         expect(send.calls.find((c) => c.type === 'denylist/add'))
           .toEqual({ type: 'denylist/add', pattern: '*.fidelity.com' });
@@ -283,7 +283,7 @@ describe('sidepanel.denylist-view', () => {
       let changed = 0;
       const { root, unmount } = await mountView(send, { onChanged: () => { changed += 1; } });
       try {
-        need(root, 'button[aria-label="Re-enable *.fidelity.com"]').click();
+        need(root, 'button[aria-label="重新启用 *.fidelity.com"]').click();
         await flush();
         expect(changed).toBe(1);
       } finally { unmount(); }
@@ -314,9 +314,9 @@ describe('sidepanel.denylist-view · categories', () => {
     const { root, unmount } = await mountView(sendCategorised());
     try {
       const labels = [...root.querySelectorAll('.denylist-group-label')].map((e) => e.textContent);
-      expect(labels.includes('Banks (US)')).toBe(true);
-      expect(labels.includes('Health (US)')).toBe(true);
-      expect(labels.includes('Your patterns')).toBe(true);
+      expect(labels.includes('银行（美国）')).toBe(true);
+      expect(labels.includes('医疗健康（美国）')).toBe(true);
+      expect(labels.includes('你的模式')).toBe(true);
       const counts = [...root.querySelectorAll('.denylist-group-count')].map((e) => e.textContent);
       // Unfiltered, a group shows its plain size — the fraction is reserved for
       // "the search narrowed this", where it carries information.
@@ -329,7 +329,7 @@ describe('sidepanel.denylist-view · categories', () => {
     try {
       const open = [...root.querySelectorAll('.denylist-group.is-open .denylist-group-label')]
         .map((e) => e.textContent);
-      expect(open).toEqual(['Your patterns']);
+      expect(open).toEqual(['你的模式']);
       // A collapsed group shows no chips…
       expect(root.querySelector('.denylist-group:not(.is-open) .denylist-group-body')).toBe(null);
       // …but is still announced as collapsed rather than missing.
@@ -343,14 +343,14 @@ describe('sidepanel.denylist-view · categories', () => {
     try {
       const banks = /** @type {HTMLButtonElement | undefined} */ (
         [...root.querySelectorAll('.denylist-group-head')]
-          .find((h) => h.textContent?.includes('Banks (US)')));
+          .find((h) => h.textContent?.includes('银行（美国）')));
       expect(!!banks).toBe(true);
       if (!banks) return;
       banks.click();
       await flush();
       const openLabels = [...root.querySelectorAll('.denylist-group.is-open .denylist-group-label')]
         .map((e) => e.textContent);
-      expect(openLabels.includes('Banks (US)')).toBe(true);
+      expect(openLabels.includes('银行（美国）')).toBe(true);
     } finally { unmount(); }
   });
 
@@ -360,14 +360,14 @@ describe('sidepanel.denylist-view · categories', () => {
     try {
       await setSearch(root, 'uhc');
       const labels = [...root.querySelectorAll('.denylist-group-label')].map((e) => e.textContent);
-      expect(labels.includes('Banks (US)')).toBe(true);
+      expect(labels.includes('银行（美国）')).toBe(true);
       const banksGroup = [...root.querySelectorAll('.denylist-group')]
-        .find((g) => g.textContent?.includes('Banks (US)'));
+        .find((g) => g.textContent?.includes('银行（美国）'));
       expect(!!banksGroup).toBe(true);
       if (!banksGroup) return;
       expect(banksGroup.classList.contains('is-empty')).toBe(true);
-      // …and while filtered it reads as a fraction, so "0 of 2" states the miss.
-      expect(need(banksGroup, '.denylist-group-count').textContent).toBe('0 of 2');
+      // …and while filtered it reads as a fraction, so "0 / 2" states the miss.
+      expect(need(banksGroup, '.denylist-group-count').textContent).toBe('0 / 2');
     } finally { unmount(); }
   });
 
@@ -377,7 +377,7 @@ describe('sidepanel.denylist-view · categories', () => {
     try {
       await setSearch(root, 'uhc');
       const health = [...root.querySelectorAll('.denylist-group')]
-        .find((g) => g.textContent?.includes('Health (US)'));
+        .find((g) => g.textContent?.includes('医疗健康（美国）'));
       expect(!!health).toBe(true);
       if (!health) return;
       expect(health.classList.contains('is-open')).toBe(true);

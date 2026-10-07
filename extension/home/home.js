@@ -15,7 +15,7 @@
 
 import m from '/vendor/mithril/mithril.js';
 import browser from '/vendor/browser-polyfill.js';
-import { CHANNEL, DWEB_ENABLED } from '/shared/channel-config.js';
+import { DWEB_ENABLED } from '/shared/channel-config.js';
 import { loadDweb } from '/shared/dweb-loader.js';
 import { openOptions } from '/shared/open-options.js';
 import { getLocale, setLocale, t } from './locale.js';
@@ -111,6 +111,33 @@ let activeView = readView();  // chat | actors | library | eval | discover | con
 clearHash();                  // deep-link consumed at boot — see viewFromHash
 /** @param {string} v */
 const setView = (v) => { activeView = v; try { localStorage.setItem(VIEW_KEY, v); } catch { /* ignore */ } };
+
+// --- Theme application & sync (auto | light | dark) -------------------------
+// `data-theme` on <html> is the single switch; CSS keys off it. 'auto' clears
+// the attribute so the prefers-color-scheme media query wins. localStorage is
+// the cross-page channel (home ↔ side panel): the `storage` event fires in the
+// OTHER pages, so each surface re-reads and redraws to stay in lock-step.
+/** @param {string | null} theme */
+const applyTheme = (theme) => {
+  if (theme === 'dark' || theme === 'light') {
+    document.documentElement.setAttribute('data-theme', theme);
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+};
+let currentTheme = 'auto';
+try { currentTheme = localStorage.getItem('theme') || 'auto'; } catch { /* storage disabled */ }
+applyTheme(currentTheme);
+window.addEventListener('storage', (e) => {
+  if (e.key !== 'theme') return;
+  currentTheme = e.newValue || 'auto';
+  applyTheme(currentTheme);
+  m.redraw();
+});
+/** @param {string} theme */
+const themeLabel = (theme) => (theme === 'light' ? t('浅色', 'Light') : (theme === 'dark' ? t('深色', 'Dark') : t('自动', 'Auto')));
+/** @param {string} theme */
+const themeEmoji = (theme) => (theme === 'light' ? '☀️' : (theme === 'dark' ? '🌙' : '🌓'));
 // SPA navigation keeps the rail mounted, so explicitly land keyboard and AT
 // users in the new content instead of leaving focus on a now-stale trigger.
 const focusActiveContent = () => requestAnimationFrame(() => {
@@ -517,8 +544,42 @@ const ChatListPanel = () => {
   let timer = 0;
   /** @type {string | null} */
   let deletingId = null;   // the row currently playing its delete animation
+  /** @type {string | null} */
+  let editingId = null;    // the row currently being renamed
+  /** @type {string} */
+  let editVal = '';        // temporary rename buffer
   const load = () => send({ type: 'session/list' })
     .then((/** @type {any} */ r) => { if (r?.ok) { sessions = r.sessions ?? []; m.redraw(); } }).catch(() => {});
+
+  /**
+   * @param {string} sessionId
+   * @param {string} oldTitle
+   */
+  const startRename = (sessionId, oldTitle) => {
+    editingId = sessionId;
+    editVal = oldTitle;
+    m.redraw();
+  };
+
+  /** @param {string} sessionId */
+  const saveRename = async (sessionId) => {
+    if (!editingId || editingId !== sessionId) return;
+    const nextVal = editVal.trim();
+    editingId = null;
+    m.redraw();
+    if (nextVal) {
+      try {
+        await send({ type: 'session/updateTitle', sessionId, title: nextVal });
+      } catch (e) { console.warn('[home] rename chat failed', e); }
+    }
+    load();
+  };
+
+  const cancelRename = () => {
+    editingId = null;
+    m.redraw();
+  };
+
   // Animate the row out, THEN archive it (a deleted chat leaves the list). If it
   // was the current chat, drop into a fresh one so the view isn't left on a
   // now-deleted session.
@@ -555,20 +616,55 @@ const ChatListPanel = () => {
         ]),
         m('button.chat-list-new', { onclick: async () => { await send({ type: 'session/reset' }); load(); } }, `＋ ${t('新对话', 'New chat')}`),
         m('.chat-list-items', visible.length
-          ? visible.map((/** @type {any} */ s) => m('.chat-list-item', {
-              key: s.sessionId,
-              class: [s.sessionId === cur ? 'is-active' : '', deletingId === s.sessionId ? 'is-deleting' : ''].filter(Boolean).join(' '),
-              role: 'button', tabindex: '0',
-              onclick: () => { if (deletingId || s.sessionId === cur) return; send({ type: 'session/switch', sessionId: s.sessionId }).then(load); },
-            }, [
-              m('.chat-list-item-title', (s.title && s.title.trim()) || t('新对话', 'New chat')),
-              m('.chat-list-item-meta', fmtAgo(s.lastMessageAt ?? s.createdAt)),
-              // Hover affordance: a 3-dot that turns into a red trash; click deletes.
-              m('button.chat-item-del', {
-                title: t('删除对话', 'Delete chat'), 'aria-label': t('删除对话', 'Delete chat'),
-                onclick: (/** @type {Event} */ e) => { e.stopPropagation(); deleteChat(s.sessionId, s.sessionId === cur); },
-              }),
-            ]))
+          ? visible.map((/** @type {any} */ s) => {
+              const isCur = s.sessionId === cur;
+              const isEditing = editingId === s.sessionId;
+              const titleText = (s.title && s.title.trim()) || t('新对话', 'New chat');
+              return m('.chat-list-item', {
+                key: s.sessionId,
+                class: [isCur ? 'is-active' : '', deletingId === s.sessionId ? 'is-deleting' : '', isEditing ? 'is-editing' : ''].filter(Boolean).join(' '),
+                role: 'button', tabindex: '0',
+                onclick: () => {
+                  if (deletingId || isEditing || isCur) return;
+                  send({ type: 'session/switch', sessionId: s.sessionId }).then(load);
+                },
+                // Double-click the row (or the ✏️) to rename in place.
+                ondblclick: (/** @type {Event} */ e) => {
+                  e.stopPropagation();
+                  startRename(s.sessionId, titleText);
+                },
+              }, [
+                isEditing
+                  ? m('input.chat-item-edit-input', {
+                      value: editVal,
+                      disabled: deletingId === s.sessionId,
+                      oninput: (/** @type {Event} */ e) => { editVal = /** @type {HTMLInputElement} */ (e.target).value; },
+                      oncreate: (/** @type {{ dom: HTMLInputElement }} */ v) => {
+                        v.dom.focus();
+                        v.dom.select();
+                      },
+                      onblur: () => saveRename(s.sessionId),
+                      onkeydown: (/** @type {KeyboardEvent} */ e) => {
+                        if (e.key === 'Enter') saveRename(s.sessionId);
+                        else if (e.key === 'Escape') cancelRename();
+                      },
+                      onclick: (/** @type {Event} */ e) => e.stopPropagation(),
+                    })
+                  : m('.chat-list-item-title', titleText),
+                m('.chat-list-item-meta', fmtAgo(s.lastMessageAt ?? s.createdAt)),
+                !isEditing ? m('button.chat-item-rename', {
+                  title: t('重命名', 'Rename'), 'aria-label': t('重命名', 'Rename'),
+                  onclick: (/** @type {Event} */ e) => {
+                    e.stopPropagation();
+                    startRename(s.sessionId, titleText);
+                  },
+                }) : null,
+                m('button.chat-item-del', {
+                  title: t('删除对话', 'Delete chat'), 'aria-label': t('删除对话', 'Delete chat'),
+                  onclick: (/** @type {Event} */ e) => { e.stopPropagation(); deleteChat(s.sessionId, s.sessionId === cur); },
+                }),
+              ]);
+            })
           : m('.chat-list-empty.muted', t('暂无对话。', 'No chats yet.'))),
       ]);
     },
@@ -715,9 +811,6 @@ const HomeApp = {
       // (matches the side-panel header — both left-hug, no centering).
       m('.home-rail-mark', [
         m(Wordmark),
-        CHANNEL === 'preview'
-          ? m('span.channel-badge.channel-badge--in', { title: t('peerd 预览版 — dweb 预览包', 'peerd preview — dweb preview package') }, t('预览版', 'preview'))
-          : null,
       ]),
       m('.home-nav', groupedNavItems(items).map((group) =>
         m('.home-nav-group', {
@@ -749,6 +842,19 @@ const HomeApp = {
       }, [
         m('span.home-action-icon', { 'aria-hidden': 'true' }, railIcon('lock')),
         m('span.home-action-label', t('锁定', 'Lock')),
+      ]),
+      m('button.home-nav-item.home-rail-action.home-rail-theme', {
+        'aria-label': themeLabel(currentTheme),
+        onclick: () => {
+          const nextTheme = currentTheme === 'auto' ? 'light' : (currentTheme === 'light' ? 'dark' : 'auto');
+          currentTheme = nextTheme;
+          try { localStorage.setItem('theme', nextTheme); } catch { /* ignore */ }
+          applyTheme(nextTheme);
+          m.redraw();
+        },
+      }, [
+        m('span.home-action-icon', { 'aria-hidden': 'true' }, themeEmoji(currentTheme)),
+        m('span.home-action-label', themeLabel(currentTheme)),
       ]),
       m('button.home-nav-item.home-rail-action.home-rail-language', {
         'aria-label': getLocale() === 'zh' ? 'Switch to English' : '切换到中文',

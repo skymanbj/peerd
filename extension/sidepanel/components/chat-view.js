@@ -19,6 +19,7 @@ import { GoalBar } from './goal-bar.js';
 import { TodoCard } from './todo-card.js';
 import { ActorFabric } from './actor-fabric.js';
 import { ContextInspector } from './context-inspector.js';
+import { SearchableSelect } from '/shared/searchable-select.js';
 import { composerForState, composerUnavailableCopy } from '../provider-readiness.js';
 
 // The transfer section's Blob + anchor pattern — the panel document is a
@@ -420,10 +421,17 @@ const ModelPicker = {
     const options = ui.options;
     return m('.model-picker', [
       m('span.model-picker-label', '模型'),
-      m('select.model-picker-select', {
-        value: ui.selected,
-        onchange: async (/** @type {Event} */ e) => {
-          const opt = options.find((o) => o.value === /** @type {HTMLSelectElement} */ (e.target).value);
+      m(SearchableSelect, {
+        value: ui.selected ?? '',
+        placeholder: '搜索模型…',
+        options: options.map((o) => ({
+          value: o.value,
+          // Mid-session shows just the model name (provider is fixed); fresh
+          // chats show "Provider · Model" since the provider can change too.
+          label: ui.locked ? o.label : `${o.providerLabel} · ${o.label}`,
+        })),
+        onchange: async (/** @type {string} */ v) => {
+          const opt = options.find((o) => o.value === v);
           if (!opt) return;
           ui.selected = opt.value;
           if (ui.locked && sessionId) {
@@ -438,10 +446,7 @@ const ModelPicker = {
           }
           m.redraw();
         },
-      }, options.map((o) =>
-        // Mid-session shows just the model name (provider is fixed); fresh
-        // chats show "Provider · Model" since the provider can change too.
-        m('option', { value: o.value }, ui.locked ? o.label : `${o.providerLabel} · ${o.label}`))),
+      }),
     ]);
   },
 };

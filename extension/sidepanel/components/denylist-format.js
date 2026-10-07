@@ -57,7 +57,7 @@ export const denylistModel = ({ patterns = [], added = [], disabled = [] }, quer
  *
  * @param {string} pattern
  * @param {boolean} isUser   true when the pattern is user-added
- * @returns {{ verb: 'Remove' | 'Disable', consequence: string }}
+ * @returns {{ verb: '移除' | '禁用', consequence: string }}
  */
 export const removalCopy = (pattern, isUser) => ({
   verb: isUser ? '移除' : '禁用',

@@ -35,7 +35,7 @@ describe('options runtime capability controls', () => {
     });
     try {
       await settle();
-      expect(root.textContent).toContain('PDF OCR is unavailable in this browser');
+      expect(root.textContent).toContain('此浏览器中无法使用 PDF OCR');
       expect(Array.from(root.querySelectorAll('button')).some((entry) =>
         entry.textContent?.includes('Download OCR'))).toBe(false);
       expect(sends).toBe(0);
@@ -58,8 +58,8 @@ describe('options runtime capability controls', () => {
     });
     try {
       await settle();
-      expect(root.textContent).toContain('Use Ollama for local inference');
-      expect(root.textContent).toContain('Unavailable');
+      expect(root.textContent).toContain('请使用 Ollama 进行本地推理');
+      expect(root.textContent).toContain('不可用');
       expect(root.querySelectorAll('button').length).toBe(0);
       expect(sends).toBe(0);
     } finally {
@@ -91,7 +91,7 @@ describe('options runtime capability controls', () => {
     try {
       await settle();
       await settle();
-      expect(root.textContent).toContain('Installed');
+      expect(root.textContent).toContain('已安装');
       expect(statusCalls).toBe(2);
       expect(readyNotices).toBe(1);
       m.mount(root, null);

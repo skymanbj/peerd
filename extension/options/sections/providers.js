@@ -722,7 +722,7 @@ export const ProvidersSection = {
                       'invalid-label': '该名称生成了空 ID — 请尝试不同的标签。',
                       locked: '密码库已锁定 — 请先在 peerd 面板中解锁。',
                     };
-                    ui.addFormMsg = { ok: false, text: errMap[r?.error] ?? r?.error ?? '出了点问题。' };
+                    ui.addFormMsg = { ok: false, text: /** @type {Record<string, string>} */ (errMap)[r?.error] ?? r?.error ?? '出了点问题。' };
                   }
                   m.redraw();
                 }).catch(() => {

@@ -58,12 +58,12 @@ describe('sidepanel.learned-origins view', () => {
       const text = root.textContent ?? '';
       expect(text.includes('acme.test')).toBe(true);
       expect(text.includes('globex.test')).toBe(true);
-      expect(text.includes('may share your browser session')).toBe(true);
-      expect(text.includes('every port and its subdomains')).toBe(true);
+      expect(text.includes('可能共享你浏览器会话')).toBe(true);
+      expect(text.includes('所有端口及其子域')).toBe(true);
       // The reason is why the site is treated as theirs — the raw enum would
       // leave a user with no way to judge whether the guess was wrong.
-      expect(text.includes('a sign-in form was on a page peerd read')).toBe(true);
-      expect(text.includes('you approved peerd sending data to it')).toBe(true);
+      expect(text.includes('peerd 读取的页面上有登录表单')).toBe(true);
+      expect(text.includes('你批准了 peerd 向其发送数据')).toBe(true);
     } finally { unmount(); }
   });
 
@@ -71,9 +71,9 @@ describe('sidepanel.learned-origins view', () => {
     const { root, unmount } = mount(() => ({ ok: true, origins: [] }));
     try {
       await settle();
-      expect((root.textContent ?? '').includes('Nothing learned yet.')).toBe(true);
+      expect((root.textContent ?? '').includes('尚未学习任何内容。')).toBe(true);
       // No Forget-all offer when there is nothing to forget.
-      expect(buttons(root, 'Forget all').length).toBe(0);
+      expect(buttons(root, '全部忘记').length).toBe(0);
     } finally { unmount(); }
   });
 
@@ -81,11 +81,11 @@ describe('sidepanel.learned-origins view', () => {
     const { root, sent, unmount } = mount();
     try {
       await settle();
-      buttons(root, 'Remove')[0].click();
+      buttons(root, '移除')[0].click();
       await settleFocus();
-      expect((root.textContent ?? '').includes('Remove this learned host?')).toBe(true);
+      expect((root.textContent ?? '').includes('移除此已学习主机？')).toBe(true);
       expect(document.activeElement?.getAttribute('data-learned-role')).toBe('confirm');
-      expect(document.activeElement?.getAttribute('aria-label')).toBe('Confirm removal of learned host acme.test');
+      expect(document.activeElement?.getAttribute('aria-label')).toBe('确认移除已学习主机 acme.test');
       // Still only the initial list call: nothing was un-learned by arming.
       expect(sent.filter((s) => s.type === 'learned/forget').length).toBe(0);
     } finally { unmount(); }
@@ -95,9 +95,9 @@ describe('sidepanel.learned-origins view', () => {
     const { root, sent, unmount } = mount();
     try {
       await settle();
-      buttons(root, 'Remove')[0].click();       // arm the first row
+      buttons(root, '移除')[0].click();       // arm the first row
       await settle();
-      buttons(root, 'Remove')[0].click();       // confirm (inside the armed row)
+      buttons(root, '移除')[0].click();       // confirm (inside the armed row)
       await settle();
       const forget = sent.find((s) => s.type === 'learned/forget');
       expect(!!forget).toBe(true);
@@ -111,13 +111,13 @@ describe('sidepanel.learned-origins view', () => {
     const { root, sent, unmount } = mount();
     try {
       await settle();
-      buttons(root, 'Remove')[0].click();
+      buttons(root, '移除')[0].click();
       await settle();
-      buttons(root, 'Keep')[0].click();
+      buttons(root, '保留')[0].click();
       await settleFocus();
-      expect((root.textContent ?? '').includes('Remove this learned host?')).toBe(false);
+      expect((root.textContent ?? '').includes('移除此已学习主机？')).toBe(false);
       expect(document.activeElement?.getAttribute('data-learned-role')).toBe('trigger');
-      expect(document.activeElement?.getAttribute('aria-label')).toBe('Remove learned host acme.test');
+      expect(document.activeElement?.getAttribute('aria-label')).toBe('移除已学习主机 acme.test');
       expect(sent.filter((s) => s.type === 'learned/forget').length).toBe(0);
     } finally { unmount(); }
   });
@@ -126,13 +126,13 @@ describe('sidepanel.learned-origins view', () => {
     const { root, sent, unmount } = mount();
     try {
       await settle();
-      buttons(root, 'Forget all')[0].click();   // arm
+      buttons(root, '全部忘记')[0].click();   // arm
       await settleFocus();
-      expect((root.textContent ?? '').includes('learned sites?')).toBe(true);
+      expect((root.textContent ?? '').includes('个已学习站点？')).toBe(true);
       expect(document.activeElement?.getAttribute('data-learned-role')).toBe('confirm-all');
-      expect(document.activeElement?.getAttribute('aria-label')).toBe('Confirm forgetting all learned hosts');
+      expect(document.activeElement?.getAttribute('aria-label')).toBe('确认忘记所有已学习主机');
       expect(sent.filter((s) => s.type === 'learned/clear').length).toBe(0);
-      buttons(root, 'Forget all')[0].click();   // confirm
+      buttons(root, '全部忘记')[0].click();   // confirm
       await settle();
       expect(sent.filter((s) => s.type === 'learned/clear').length).toBe(1);
     } finally { unmount(); }
@@ -154,16 +154,16 @@ describe('sidepanel.learned-origins view', () => {
     });
     try {
       await settle();
-      buttons(root, 'Remove')[0].click();
+      buttons(root, '移除')[0].click();
       await settle();
-      buttons(root, 'Remove')[0].click();
+      buttons(root, '移除')[0].click();
       await settleFocus();
       const text = root.textContent ?? '';
-      expect(text.includes('already removed somewhere else')).toBe(true);
+      expect(text.includes('已在别处被移除')).toBe(true);
       // It re-read the list (2 list calls: mount + after the stale reply)...
       expect(sentTypes.filter((t) => t === 'learned/list').length).toBe(2);
       // ...and the armed confirm is gone rather than left hanging.
-      expect(text.includes('Remove this learned host?')).toBe(false);
+      expect(text.includes('移除此已学习主机？')).toBe(false);
       expect(document.activeElement?.getAttribute('data-learned-host')).toBe('globex.test');
     } finally { unmount(); }
   });
@@ -181,16 +181,16 @@ describe('sidepanel.learned-origins view', () => {
     });
     try {
       await settle();
-      buttons(root, 'Remove')[0].click();
+      buttons(root, '移除')[0].click();
       await settle();
-      buttons(root, 'Remove')[0].click();
+      buttons(root, '移除')[0].click();
       await settleFocus();
       const text = root.textContent ?? '';
       expect(text.includes('invalid-origin')).toBe(true);
       expect(root.querySelector('[role="alert"]')?.textContent).toBe('invalid-origin');
       expect(document.activeElement?.getAttribute('data-learned-role')).toBe('confirm');
       expect(sentTypes.filter((t) => t === 'learned/list').length).toBe(1);
-      expect(text.includes('Remove this learned host?')).toBe(true);
+      expect(text.includes('移除此已学习主机？')).toBe(true);
     } finally { unmount(); }
   });
 
@@ -200,12 +200,12 @@ describe('sidepanel.learned-origins view', () => {
       : { ok: true, origins: ORIGINS }));
     try {
       await settle();
-      buttons(root, 'Forget all')[0].click();
+      buttons(root, '全部忘记')[0].click();
       await settle();
-      buttons(root, 'Forget all')[0].click();
+      buttons(root, '全部忘记')[0].click();
       await settleFocus();
-      expect((root.textContent ?? '').includes('Forgot 2 learned sites.')).toBe(true);
-      expect(root.querySelector('[role="status"]')?.textContent).toBe('Forgot 2 learned sites.');
+      expect((root.textContent ?? '').includes('已忘记 2 个已学习站点。')).toBe(true);
+      expect(root.querySelector('[role="status"]')?.textContent).toBe('已忘记 2 个已学习站点。');
       expect(document.activeElement?.getAttribute('data-learned-role')).toBe('heading');
     } finally { unmount(); }
   });

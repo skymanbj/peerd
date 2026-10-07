@@ -58,7 +58,9 @@ const walk = (dir: string, out: string[] = []): string[] => {
 
 const violations: string[] = [];
 for (const file of walk(EXTENSION_DIR)) {
-  const rel = relative(EXTENSION_DIR, file);
+  // path.relative yields backslashes on Windows; normalize to POSIX so the
+  // ALLOWED lookup and the tests/ + eval/ prefixes match on every platform.
+  const rel = relative(EXTENSION_DIR, file).replaceAll('\\', '/');
   if (ALLOWED.has(rel)) continue;
   // tests/ and eval/ never ship — package.ts prunes them from BOTH
   // artifacts — so in-browser dweb tests may import the module.

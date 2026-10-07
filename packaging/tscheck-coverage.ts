@@ -53,8 +53,12 @@ export interface TscheckCoverage { count: number; total: number; pct: number; }
  *  can never grow to protect web files. */
 export const computeCoverage = (): TscheckCoverage => {
   const webShell = join(REPO_ROOT, 'web', 'public');
+  // path.relative yields backslashes on Windows; normalize to POSIX so the
+  // ES5_INJECTED lookup (a POSIX-path set) matches on every platform. Without
+  // this the seven exempt injected bodies stay in the denominator and the
+  // reported coverage reads 99.1% instead of 100%.
   const files = [
-    ...walk(EXTENSION_DIR).filter((f) => !ES5_INJECTED.has(relative(EXTENSION_DIR, f))),
+    ...walk(EXTENSION_DIR).filter((f) => !ES5_INJECTED.has(relative(EXTENSION_DIR, f).replaceAll('\\', '/'))),
     ...(existsSync(webShell) ? walk(webShell) : []),
   ];
   const count = files.filter((f) => hasDirective(readFileSync(f, 'utf8'))).length;

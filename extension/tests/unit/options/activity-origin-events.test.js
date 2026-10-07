@@ -33,7 +33,7 @@ describe('options.activity — origin-lock events', () => {
       await settle();
       const text = root.textContent ?? '';
       expect(text.includes('origin_learned_sensitive')).toBe(false);   // no raw slug
-      expect(text.includes('host may share browser session')).toBe(true);
+      expect(text.includes('主机可共享浏览器会话')).toBe(true);
       expect(text.includes('bank.test')).toBe(true);                   // WHICH host
       expect(text.includes('password-field')).toBe(true);              // and why
     } finally { unmount(); }
@@ -46,7 +46,7 @@ describe('options.activity — origin-lock events', () => {
     try {
       await settle();
       const text = root.textContent ?? '';
-      expect(text.includes('web helper stopped')).toBe(true);
+      expect(text.includes('web 助手已停止')).toBe(true);
       expect(text.includes('https://bank.test')).toBe(true);
       expect(text.includes('handoff')).toBe(true);
     } finally { unmount(); }
@@ -61,7 +61,7 @@ describe('options.activity — origin-lock events', () => {
     try {
       await settle();
       const text = root.textContent ?? '';
-      expect(text.includes('learned host removed')).toBe(true);
+      expect(text.includes('已移除已学习主机')).toBe(true);
       expect(text.includes('shop.test')).toBe(true);
     } finally { unmount(); }
   });

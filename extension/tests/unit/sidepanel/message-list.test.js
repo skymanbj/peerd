@@ -39,7 +39,7 @@ describe('sidepanel.message-list aborted cards', () => {
       // the turn itself shows a "stopped" chip
       const chip = /** @type {Element} */ (root.querySelector('.stop-chip'));
       expect(chip).toBeTruthy();
-      expect((chip.textContent || '').includes('stopped')).toBe(true);
+      expect((chip.textContent || '').includes('已停止')).toBe(true);
     } finally { unmount(); }
   });
 
@@ -82,7 +82,7 @@ describe('sidepanel.message-list aborted cards', () => {
     try {
       await flush();
       const state = root.querySelector('.script-op-state');
-      expect(state?.textContent).toBe('cancelled');
+      expect(state?.textContent).toBe('已取消');
       expect(root.querySelector('.script-op-dot.dot-cancelled')).toBeTruthy();
       expect(root.querySelector('.script-op-dot.dot-failed')).toBeFalsy();
     } finally { unmount(); }
@@ -125,7 +125,7 @@ describe('sidepanel.message-list peerd tab notice', () => {
     try {
       await flush();
       expect(root.querySelector('.tool-call')?.classList.contains('tool-ok')).toBe(true);
-      expect(root.querySelector('.policy-kind-chip')?.textContent).toBe('child action stopped');
+      expect(root.querySelector('.policy-kind-chip')?.textContent).toBe('子操作已停止');
     } finally { unmount(); }
   });
 
@@ -146,7 +146,7 @@ describe('sidepanel.message-list peerd tab notice', () => {
     ]);
     try {
       await flush();
-      expect(root.querySelector('.policy-kind-chip')?.textContent).toBe('child control not confirmed');
+      expect(root.querySelector('.policy-kind-chip')?.textContent).toBe('未确认子标签页控制');
     } finally { unmount(); }
   });
 
@@ -167,7 +167,7 @@ describe('sidepanel.message-list peerd tab notice', () => {
     ]);
     try {
       await flush();
-      expect(root.querySelector('.policy-kind-chip')?.textContent).toBe('child control not confirmed');
+      expect(root.querySelector('.policy-kind-chip')?.textContent).toBe('未确认子标签页控制');
     } finally { unmount(); }
   });
 
@@ -197,9 +197,9 @@ describe('sidepanel.message-list peerd tab notice', () => {
     });
     try {
       await flush();
-      expect(root.querySelector('.agent-tab-notice-text')?.textContent).toContain('left a blank tab');
-      expect(root.querySelector('.agent-tab-notice-detail')?.textContent).toContain('not confirmed');
-      expect(root.textContent?.includes('opened a task tab')).toBe(false);
+      expect(root.querySelector('.agent-tab-notice-text')?.textContent).toContain('留下了一个空白标签页');
+      expect(root.querySelector('.agent-tab-notice-detail')?.textContent).toContain('未确认');
+      expect(root.textContent?.includes('打开了一个任务标签页')).toBe(false);
     } finally { unmount(); }
   });
 
@@ -211,15 +211,15 @@ describe('sidepanel.message-list peerd tab notice', () => {
     });
     try {
       await flush();
-      expect(root.querySelector('.agent-tab-notice-text')?.textContent).toContain('opened a task tab');
+      expect(root.querySelector('.agent-tab-notice-text')?.textContent).toContain('打开了一个任务标签页');
       const detail = root.querySelector('.agent-tab-notice-detail')?.textContent || '';
-      expect(detail).toContain('additional browser safeguards');
+      expect(detail).toContain('额外的浏览器保护措施');
       expect(detail.includes('public browsing')).toBe(false);
       expect(detail.includes('other tabs')).toBe(false);
       expect(detail.includes('Local network')).toBe(false);
       expect(detail.includes('sensitive sites')).toBe(false);
       const go = /** @type {HTMLButtonElement} */ (root.querySelector('.agent-tab-notice-go'));
-      expect(go.getAttribute('aria-label')).toContain('task tab');
+      expect(go.getAttribute('aria-label')).toContain('任务标签页');
       go.click();
       expect(opened).toEqual([[9, 2]]);
     } finally { unmount(); }
@@ -234,8 +234,8 @@ describe('sidepanel.message-list peerd tab notice', () => {
       m.redraw.sync();
       const status = root.querySelector('.message-list-announcement');
       expect(status?.getAttribute('aria-live')).toBe('polite');
-      expect(status?.textContent).toContain('opened a task tab');
-      expect(status?.textContent).toContain('additional browser safeguards');
+      expect(status?.textContent).toContain('打开了一个带有额外浏览器保护措施的任务标签页');
+      expect(status?.textContent).toContain('额外浏览器保护措施');
       const first = status?.textContent;
       m.redraw.sync();
       expect(root.querySelector('.message-list-announcement')?.textContent).toBe(first);
@@ -249,7 +249,7 @@ describe('sidepanel.message-list peerd tab notice', () => {
     try {
       await flush();
       expect(root.querySelector('.agent-tab-notice-text')?.textContent)
-        .toContain('opened a task tab · WebVM · audit vm');
+        .toContain('打开了一个任务标签页 · WebVM · audit vm');
       expect(root.textContent?.includes('opened a web tab')).toBe(false);
       expect(root.textContent?.includes('public browsing')).toBe(false);
     } finally { unmount(); }
@@ -265,8 +265,8 @@ describe('sidepanel.message-list peerd tab notice', () => {
       m.redraw.sync();
       const status = root.querySelector('.message-list-announcement');
       expect(status?.getAttribute('aria-live')).toBe('polite');
-      expect(status?.textContent).toContain('left a blank tab');
-      expect(status?.textContent).toContain('browser control was not confirmed');
+      expect(status?.textContent).toContain('留下了一个空白标签页');
+      expect(status?.textContent).toContain('未确认浏览器控制');
     } finally { unmount(); }
   });
 });
@@ -285,7 +285,7 @@ describe('sidepanel.message-list actor-reply bubbles', () => {
       const bubbleMsg = /** @type {Element} */ (root.querySelector('.message-actor-reply'));
       expect(bubbleMsg).toBeTruthy();
       const role = (bubbleMsg.querySelector('.role')?.textContent) || '';
-      expect(role.includes('notebook actor')).toBe(true);
+      expect(role.includes('notebook 参与者')).toBe(true);
       expect(role.includes('Esoteric Math')).toBe(true);
       const body = (bubbleMsg.querySelector('.bubble')?.textContent) || '';
       expect(body.includes('ran the script, chart rendered')).toBe(true);
@@ -308,7 +308,7 @@ describe('sidepanel.message-list actor-reply bubbles', () => {
       expect(bubbles.length).toBe(1);                       // only the actor reply renders
       const msg = /** @type {Element} */ (root.querySelector('.message-actor-reply'));
       expect(msg.classList.contains('failed')).toBe(true);
-      expect(((msg.querySelector('.role')?.textContent) || '').includes('failed')).toBe(true);
+      expect(((msg.querySelector('.role')?.textContent) || '').includes('失败')).toBe(true);
     } finally { unmount(); }
   });
 
@@ -324,9 +324,9 @@ describe('sidepanel.message-list actor-reply bubbles', () => {
       const role = message.querySelector('.role')?.textContent ?? '';
       expect(message.classList.contains('cancelled')).toBe(true);
       expect(message.classList.contains('failed')).toBe(false);
-      expect(role).toContain('cancelled');
-      expect(role.includes('failed')).toBe(false);
-      expect(role.includes('Not run')).toBe(false);
+      expect(role).toContain('已取消');
+      expect(role.includes('失败')).toBe(false);
+      expect(role.includes('未运行')).toBe(false);
     } finally { unmount(); }
   });
 
@@ -345,8 +345,8 @@ describe('sidepanel.message-list actor-reply bubbles', () => {
       const role = message.querySelector('.role')?.textContent ?? '';
       expect(message.classList.contains('failed')).toBe(true);
       expect(message.classList.contains('cancelled')).toBe(false);
-      expect(role).toContain('Outcome unknown');
-      expect(role.includes('cancelled')).toBe(false);
+      expect(role).toContain('结果未知');
+      expect(role.includes('已取消')).toBe(false);
     } finally { unmount(); }
   });
 
@@ -364,10 +364,10 @@ describe('sidepanel.message-list actor-reply bubbles', () => {
     try {
       await flush();
       const message = /** @type {Element} */ (root.querySelector('.message-actor-reply'));
-      expect(message.querySelector('.role')?.textContent).toContain('Not run');
+      expect(message.querySelector('.role')?.textContent).toContain('未运行');
       expect(message.querySelector('.role')?.textContent?.includes(' · failed')).toBe(false);
       expect(message.querySelector('.bubble')?.textContent)
-        .toBe('No actor work was started. Review the request before trying again.');
+        .toBe('未启动任何参与者工作。重试前请检查该请求。');
       expect(/actor-provider|identity_provider|sensitive_tab|isolation|Do not retry|Ask the user/i
         .test(message.querySelector('.bubble')?.textContent ?? '')).toBe(false);
     } finally { unmount(); }
@@ -387,8 +387,8 @@ describe('sidepanel.message-list actor-reply bubbles', () => {
       await flush();
       const message = /** @type {Element} */ (root.querySelector('.message-actor-reply'));
       const role = message.querySelector('.role')?.textContent ?? '';
-      expect(role).toContain('failed');
-      expect(role.includes('Not run')).toBe(false);
+      expect(role).toContain('失败');
+      expect(role.includes('未运行')).toBe(false);
       expect(message.querySelector('.bubble')?.textContent)
         .toContain('actor_isolation_unavailable');
     } finally { unmount(); }
@@ -413,10 +413,10 @@ describe('sidepanel.message-list actor disclosures', () => {
     try {
       await flush();
       const toggle = /** @type {HTMLButtonElement} */ (root.querySelector('.tool-actor > button.tool-call-header'));
-      expect(toggle.textContent).toContain('Not run');
+      expect(toggle.textContent).toContain('未运行');
       toggle.click();
       await flush();
-      expect(root.textContent).toContain('No actor work was started. Review the request before trying again.');
+      expect(root.textContent).toContain('未启动任何参与者工作。重试前请检查该请求。');
       expect(root.textContent.includes('actor-provider-boundary-blocked')).toBe(false);
       expect(root.textContent.includes('Do not retry automatically')).toBe(false);
       expect(root.textContent.includes('Ask the user')).toBe(false);
@@ -444,7 +444,7 @@ describe('sidepanel.message-list actor disclosures', () => {
       expect(toggle).toBeTruthy();
       expect(toggle.type).toBe('button');
       expect(toggle.getAttribute('aria-expanded')).toBe('false');
-      expect(toggle.textContent).toContain('Not run');
+      expect(toggle.textContent).toContain('未运行');
       const card = root.querySelector('.tool-actor');
       expect(card?.classList.contains('tool-not-run')).toBe(true);
       expect(card?.classList.contains('tool-failed')).toBe(false);
@@ -456,7 +456,7 @@ describe('sidepanel.message-list actor disclosures', () => {
       toggle.click();
       await flush();
       expect(toggle.getAttribute('aria-expanded')).toBe('true');
-      expect(root.textContent).toContain('No actor work was started. Review the request before trying again.');
+      expect(root.textContent).toContain('未启动任何参与者工作。重试前请检查该请求。');
       expect(root.textContent.includes('actor-provider-boundary-blocked')).toBe(false);
       expect(root.textContent.includes('Do not retry automatically')).toBe(false);
       expect(root.textContent.includes('reply will arrive')).toBe(false);
@@ -484,9 +484,9 @@ describe('sidepanel.message-list actor disclosures', () => {
     try {
       await flush();
       const toggle = /** @type {HTMLButtonElement} */ (root.querySelector('.tool-actor > button.tool-call-header'));
-      expect(toggle.textContent).toContain('failed');
-      expect(toggle.textContent?.includes('Outcome unknown')).toBe(false);
-      expect(toggle.textContent?.includes('Not run')).toBe(false);
+      expect(toggle.textContent).toContain('失败');
+      expect(toggle.textContent?.includes('结果未知')).toBe(false);
+      expect(toggle.textContent?.includes('未运行')).toBe(false);
       expect(toggle.textContent?.includes('sign-in service')).toBe(false);
     } finally { unmount(); }
   });
@@ -516,12 +516,12 @@ describe('sidepanel.message-list actor disclosures', () => {
       const toggle = /** @type {HTMLButtonElement} */ (card.querySelector('button.tool-call-header'));
       expect(card.classList.contains('tool-failed')).toBe(true);
       expect(card.classList.contains('tool-cancelled')).toBe(false);
-      expect(toggle.textContent).toContain('Outcome unknown');
-      expect(toggle.textContent?.includes('cancelled')).toBe(false);
+      expect(toggle.textContent).toContain('结果未知');
+      expect(toggle.textContent?.includes('已取消')).toBe(false);
       toggle.click();
       await flush();
-      expect(root.textContent).toContain('Outcome unknown');
-      expect(root.textContent).toContain('Check the target before trying again');
+      expect(root.textContent).toContain('结果未知');
+      expect(root.textContent).toContain('重试前请检查目标');
     } finally { unmount(); }
   });
 
@@ -543,10 +543,10 @@ describe('sidepanel.message-list actor disclosures', () => {
     try {
       await flush();
       const toggle = /** @type {HTMLButtonElement} */ (root.querySelector('.tool-actor > button.tool-call-header'));
-      expect(toggle.textContent).toContain('Not run');
+      expect(toggle.textContent).toContain('未运行');
       toggle.click();
       await flush();
-      expect(root.textContent).toContain('No actor work was started. Review the request before trying again.');
+      expect(root.textContent).toContain('未启动任何参与者工作。重试前请检查该请求。');
       expect(root.textContent.includes('actor_sensitive_tab_requires_site')).toBe(false);
       expect(root.textContent.includes('suggestedHandle')).toBe(false);
       expect(root.textContent.includes('explicit actor')).toBe(false);
@@ -591,10 +591,10 @@ describe('sidepanel.message-list actor disclosures', () => {
       const toggles = /** @type {NodeListOf<HTMLButtonElement>} */ (
         root.querySelectorAll('.tool-actor > button.tool-call-header'));
       expect(toggles.length).toBe(2);
-      expect(toggles[0].textContent).toContain('working');
-      expect(toggles[0].textContent?.includes('Not run')).toBe(false);
-      expect(toggles[1].textContent).toContain('Not run');
-      expect(toggles[1].textContent?.includes('working')).toBe(false);
+      expect(toggles[0].textContent).toContain('工作中');
+      expect(toggles[0].textContent?.includes('未运行')).toBe(false);
+      expect(toggles[1].textContent).toContain('未运行');
+      expect(toggles[1].textContent?.includes('工作中')).toBe(false);
       const cards = root.querySelectorAll('.tool-actor');
       expect(cards[0].classList.contains('tool-pending')).toBe(true);
       expect(cards[1].classList.contains('tool-not-run')).toBe(true);
@@ -648,10 +648,10 @@ describe('sidepanel.message-list actor disclosures', () => {
       const toggles = /** @type {NodeListOf<HTMLButtonElement>} */ (
         root.querySelectorAll('.tool-actor > button.tool-call-header'));
       expect(toggles.length).toBe(2);
-      expect(toggles[0].textContent).toContain('Outcome unknown');
-      expect(toggles[0].textContent?.includes('working')).toBe(false);
+      expect(toggles[0].textContent).toContain('结果未知');
+      expect(toggles[0].textContent?.includes('工作中')).toBe(false);
       expect(cards[0].classList.contains('tool-failed')).toBe(true);
-      expect(toggles[1].textContent).toContain('working');
+      expect(toggles[1].textContent).toContain('工作中');
       expect(cards[1].classList.contains('tool-pending')).toBe(true);
     } finally { unmount(); }
   });
@@ -674,12 +674,12 @@ describe('sidepanel.message-list actor disclosures', () => {
     try {
       await flush();
       const toggle = /** @type {HTMLButtonElement} */ (root.querySelector('.tool-actor > button.tool-call-header'));
-      expect(toggle.textContent).toContain('Not run');
+      expect(toggle.textContent).toContain('未运行');
       expect(toggle.textContent).toContain('actor');
       expect(toggle.textContent?.includes('sign-in service')).toBe(false);
       expect(toggle.textContent.includes('site:')).toBe(false);
       expect(toggle.textContent.includes('actor ·')).toBe(false);
-      expect(root.querySelector('.tool-args')?.textContent).toBe('actor: "inspect it"');
+      expect(root.querySelector('.tool-args')?.textContent).toBe('参与者: "inspect it"');
       const card = root.querySelector('.tool-actor');
       expect(card?.classList.contains('tool-not-run')).toBe(true);
       expect(card?.classList.contains('tool-failed')).toBe(false);
@@ -690,7 +690,7 @@ describe('sidepanel.message-list actor disclosures', () => {
       toggle.click();
       await flush();
       const detail = root.querySelector('.actor-body .error-line')?.textContent ?? '';
-      expect(detail).toBe('No actor work was started. Review the request before trying again.');
+      expect(detail).toBe('未启动任何参与者工作。重试前请检查该请求。');
       expect(detail.includes('actor_identity_provider_transit_only')).toBe(false);
     } finally { unmount(); }
   });
@@ -713,10 +713,10 @@ describe('sidepanel.message-list actor disclosures', () => {
     try {
       await flush();
       const toggle = /** @type {HTMLButtonElement} */ (root.querySelector('.tool-actor > button.tool-call-header'));
-      expect(toggle.textContent).toContain('Not run');
+      expect(toggle.textContent).toContain('未运行');
       toggle.click();
       await flush();
-      expect(root.textContent).toContain('No actor work was started. Review the request before trying again.');
+      expect(root.textContent).toContain('未启动任何参与者工作。重试前请检查该请求。');
       expect(root.textContent.includes('Policy:')).toBe(false);
       expect(root.textContent.includes('retryable')).toBe(false);
     } finally { unmount(); }
@@ -738,7 +738,7 @@ describe('sidepanel.message-list actor disclosures', () => {
       const toggle = /** @type {HTMLButtonElement} */ (root.querySelector('.tool-actor > button.tool-call-header'));
       expect(toggle).toBeTruthy();
       expect(toggle.getAttribute('aria-expanded')).toBe('false');
-      expect(toggle.textContent).toContain('done');
+      expect(toggle.textContent).toContain('完成');
       toggle.click();
       await flush();
       expect(toggle.getAttribute('aria-expanded')).toBe('true');
@@ -762,11 +762,11 @@ describe('sidepanel.message-list actor disclosures', () => {
     try {
       await flush();
       const toggle = /** @type {HTMLButtonElement} */ (root.querySelector('.tool-actor > button.tool-call-header'));
-      expect(toggle.textContent).toContain('accepted');
-      expect(toggle.textContent?.includes('done')).toBe(false);
+      expect(toggle.textContent).toContain('已接受');
+      expect(toggle.textContent?.includes('完成')).toBe(false);
       toggle.click();
       await flush();
-      expect(root.textContent).toContain('request accepted; check later messages for the reply');
+      expect(root.textContent).toContain('请求已接受；请查看后续消息以获取回复');
     } finally { unmount(); }
   });
 
@@ -790,8 +790,8 @@ describe('sidepanel.message-list actor disclosures', () => {
     try {
       await flush();
       const toggle = /** @type {HTMLButtonElement} */ (root.querySelector('.tool-actor > button.tool-call-header'));
-      expect(toggle.textContent).toContain('done');
-      expect(toggle.textContent?.includes('accepted')).toBe(false);
+      expect(toggle.textContent).toContain('完成');
+      expect(toggle.textContent?.includes('已接受')).toBe(false);
       toggle.click();
       await flush();
       expect(root.textContent).toContain('The result is 42');
@@ -819,11 +819,11 @@ describe('sidepanel.message-list actor disclosures', () => {
     try {
       await flush();
       const toggle = /** @type {HTMLButtonElement} */ (root.querySelector('.tool-actor > button.tool-call-header'));
-      expect(toggle.textContent).toContain('handed off');
-      expect(toggle.textContent?.includes('done')).toBe(false);
+      expect(toggle.textContent).toContain('已移交');
+      expect(toggle.textContent?.includes('完成')).toBe(false);
       toggle.click();
       await flush();
-      expect(root.textContent).toContain('the actor is still working; check later messages for the reply');
+      expect(root.textContent).toContain('参与者仍在工作；请查看后续消息以获取回复');
     } finally { unmount(); }
   });
 });

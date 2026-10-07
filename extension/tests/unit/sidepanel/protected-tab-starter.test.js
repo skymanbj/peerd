@@ -13,24 +13,24 @@ const browsePrompt = (status) => promptsFor({
 describe('sidepanel protected-tab starter', () => {
   it('offers summarize only for a verified public page', () => {
     const prompt = browsePrompt('web');
-    expect(prompt?.label).toBe('Summarize');
-    expect(prompt?.text).toBe('Summarize the current page.');
+    expect(prompt?.label).toBe('总结');
+    expect(prompt?.text).toBe('总结当前页面。');
   });
 
   it('replaces private and sensitive page work with a disabled policy receipt', () => {
     const privatePage = browsePrompt('protected_private');
     const sensitivePage = browsePrompt('protected_sensitive');
-    expect(privatePage?.label).toBe('Protected');
+    expect(privatePage?.label).toBe('受保护');
     expect(privatePage?.blocked).toBe(true);
-    expect(privatePage?.text).toContain('private-network page');
-    expect(sensitivePage?.label).toBe('Protected');
+    expect(privatePage?.text).toContain('私有网络页面');
+    expect(sensitivePage?.label).toBe('受保护');
     expect(sensitivePage?.blocked).toBe(true);
-    expect(sensitivePage?.text).toContain('sensitive page');
+    expect(sensitivePage?.text).toContain('敏感页面');
   });
 
   it('keeps the generic browse starter when policy status is unavailable', () => {
     const prompt = browsePrompt('unknown');
-    expect(prompt?.label).toBe('Browse');
+    expect(prompt?.label).toBe('浏览');
     expect(prompt?.text.includes('current page')).toBe(false);
   });
 

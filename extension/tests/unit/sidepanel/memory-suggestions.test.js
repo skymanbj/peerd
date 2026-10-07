@@ -115,12 +115,12 @@ describe('options.memory-suggestions', () => {
         const cards = root.querySelectorAll('.memory-suggestion');
         expect(cards.length).toBe(2);
         expect(root.textContent).toContain('Works at Hydra Host');
-        expect(root.textContent).toContain('from “GPU procurement”');
+        expect(root.textContent).toContain('来自“GPU procurement”');
         // Every suggestion gets its own Approve + Dismiss.
         expect(root.querySelectorAll('.memory-suggestion button').length).toBe(4);
         // Nothing is saved without approval — the copy says so.
         expect(need(root, '.memory-suggestions').textContent)
-          .toContain('Nothing is saved without your OK');
+          .toContain('未经您的确认不会保存任何内容');
       } finally { unmount(); }
     });
 
@@ -148,7 +148,7 @@ describe('options.memory-suggestions', () => {
       const { root, unmount } = await mountView(send);
       try {
         const before = send.calls.filter((c) => c.type === 'memory/suggestions').length;
-        need(root, 'button[aria-label^="Approve suggestion: Works at Hydra"]').click();
+        need(root, 'button[aria-label^="批准建议：Works at Hydra"]').click();
         await flush();
         await flush();
         const approve = send.calls.find((c) => c.type === 'memory/suggestions/approve');
@@ -159,7 +159,7 @@ describe('options.memory-suggestions', () => {
         // both the pane's list and the nav badge count.
         expect(send.calls.filter((c) => c.type === 'memory/suggestions').length)
           .toBeGreaterThan(before);
-        expect(root.querySelector('.key-msg.ok')?.textContent).toContain('Added to user memory');
+        expect(root.querySelector('.key-msg.ok')?.textContent).toContain('已添加到用户内存');
       } finally { unmount(); }
     });
 
@@ -167,7 +167,7 @@ describe('options.memory-suggestions', () => {
       const send = makeSend();
       const { root, unmount } = await mountView(send);
       try {
-        need(root, 'button[aria-label^="Dismiss suggestion: Prefers dark"]').click();
+        need(root, 'button[aria-label^="忽略建议：Prefers dark"]').click();
         await flush();
         const dismiss = send.calls.find((c) => c.type === 'memory/suggestions/dismiss');
         expect(dismiss).toEqual({ type: 'memory/suggestions/dismiss', id: 'sug-2' });
@@ -181,7 +181,7 @@ describe('options.memory-suggestions', () => {
       });
       const { root, unmount } = await mountView(send);
       try {
-        need(root, 'button[aria-label^="Approve suggestion: Works at Hydra"]').click();
+        need(root, 'button[aria-label^="批准建议：Works at Hydra"]').click();
         await flush();
         await flush();
         expect(root.querySelector('.key-msg.err')?.textContent).toContain('vault-locked');

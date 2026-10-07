@@ -135,11 +135,11 @@ describe('home.library', () => {
     });
     const { root, unmount } = await mountView(send);
     try {
-      clickText(root, 'button', 'Import Git');
+      clickText(root, 'button', '导入 Git');
       await flush();
-      const url = need(root, 'input[aria-label="Git repository URL"]', HTMLInputElement);
-      const ref = need(root, 'input[aria-label="Git branch or tag"]', HTMLInputElement);
-      const name = need(root, 'input[aria-label="Imported App display name"]', HTMLInputElement);
+      const url = need(root, 'input[aria-label="Git 仓库 URL"]', HTMLInputElement);
+      const ref = need(root, 'input[aria-label="Git 分支或标签"]', HTMLInputElement);
+      const name = need(root, 'input[aria-label="导入应用的显示名称"]', HTMLInputElement);
       url.value = 'https://github.com/example/notes';
       ref.value = 'release';
       name.value = 'Shared Notes';
@@ -147,7 +147,7 @@ describe('home.library', () => {
       ref.dispatchEvent(new Event('input'));
       name.dispatchEvent(new Event('input'));
       await flush();
-      clickText(root, 'button', 'Clone App');
+      clickText(root, 'button', '克隆应用');
       await flush();
       expect(send.calls.find((call) => call.type === 'apps/import-git')).toEqual({
         type: 'apps/import-git',
@@ -155,14 +155,14 @@ describe('home.library', () => {
         ref: 'release',
         name: 'Shared Notes',
       });
-      expect(root.textContent).toContain('opened it with its bound actor');
+      expect(root.textContent).toContain('并连同其绑定参与者一起打开');
     } finally { unmount(); }
   });
 
   it('favorites-only filter hides non-favorites', async () => {
     const { root, unmount } = await mountView(makeSend());
     try {
-      need(root, 'button[title="Show favorites only"]').click();
+      need(root, 'button[title="仅显示收藏"]').click();
       await flush();
       expect(names(root)).toEqual(['Snake Game']);
     } finally { unmount(); }
@@ -175,9 +175,9 @@ describe('home.library', () => {
       trigger.focus();
       trigger.click();
       await flush();
-      expect(document.activeElement?.textContent).toBe('Rename');
+      expect(document.activeElement?.textContent).toBe('重命名');
       document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-      expect(document.activeElement?.textContent).toBe('History & Git');
+      expect(document.activeElement?.textContent).toBe('历史与 Git');
       document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       await flush();
       await focusSettles(() => document.activeElement === trigger);
@@ -191,7 +191,7 @@ describe('home.library', () => {
     const { root, unmount } = await mountView(send);
     try {
       // Calculator is not a favorite → its card star is titled "Favorite".
-      need(root, 'button[title="Favorite"]').click();
+      need(root, 'button[title="收藏"]').click();
       await flush();
       expect(send.calls.find((c) => c.type === 'apps/favorite'))
         .toEqual({ type: 'apps/favorite', appId: 'app-1', favorite: true });
@@ -205,10 +205,10 @@ describe('home.library', () => {
       // Secondary actions live behind the kebab now; Delete arms in-menu.
       need(root, '.library-kebab').click();
       await flush();
-      clickText(root, '.library-menu-item', 'Delete');   // arms
+      clickText(root, '.library-menu-item', '删除');   // arms
       await flush();
       expect(send.calls.some((c) => c.type === 'apps/delete')).toBe(false);
-      const confirm = /** @type {HTMLElement} */ (byText(root, '.library-menu-item', 'Delete?'));
+      const confirm = /** @type {HTMLElement} */ (byText(root, '.library-menu-item', '删除？'));
       confirm.focus();
       confirm.click();                                  // confirms
       await flush();
@@ -230,9 +230,9 @@ describe('home.library', () => {
     try {
       need(root, '.library-kebab').click();
       await flush();
-      clickText(root, '.library-menu-item', 'Delete');
+      clickText(root, '.library-menu-item', '删除');
       await flush();
-      const confirm = /** @type {HTMLElement} */ (byText(root, '.library-menu-item', 'Delete?'));
+      const confirm = /** @type {HTMLElement} */ (byText(root, '.library-menu-item', '删除？'));
       confirm.focus();
       confirm.click();
       await flush();
@@ -251,13 +251,13 @@ describe('home.library', () => {
     try {
       need(root, '.library-kebab').click();
       await flush();
-      clickText(root, '.library-menu-item', 'Delete');   // arms
+      clickText(root, '.library-menu-item', '删除');   // arms
       await flush();
       // The confirm names the seeding consequence and the armed label changes.
-      expect(root.textContent).toContain('seeding this app to peers');
-      expect(byText(root, '.library-menu-item', 'Stop sharing & delete?')).toBeTruthy();
-      expect(byText(root, '.library-menu-item', 'Delete?')).toBeFalsy();
-      clickText(root, '.library-menu-item', 'Stop sharing & delete?');
+      expect(root.textContent).toContain('您正在向对端播种此应用');
+      expect(byText(root, '.library-menu-item', '停止共享并删除？')).toBeTruthy();
+      expect(byText(root, '.library-menu-item', '删除？')).toBeFalsy();
+      clickText(root, '.library-menu-item', '停止共享并删除？');
       await flush();
       expect(send.calls.some((c) => c.type === 'apps/delete' && c.appId === 'app-9')).toBe(true);
     } finally { unmount(); }
@@ -267,17 +267,17 @@ describe('home.library', () => {
     const send = makeSend();
     const { root, unmount } = await mountView(send, { dweb: true });
     try {
-      clickText(root, 'button', 'Share');   // opens the dialog (no dispatch yet)
+      clickText(root, 'button', '分享');   // opens the dialog (no dispatch yet)
       await flush();
       expect(send.calls.some((c) => c.type === 'dweb/base/share-app')).toBe(false);
-      expect(root.textContent).toContain('including data/*.json');
+      expect(root.textContent).toContain('包括 data/*.json');
       const input = need(root, '.library-share input', HTMLInputElement);
       expect(input).toBeTruthy();
       expect(input.disabled).toBe(false);        // editable on first share
       input.value = 'My Cool App!';
       input.dispatchEvent(new Event('input'));
       await flush();
-      clickText(root, '.library-share button', 'Share');
+      clickText(root, '.library-share button', '分享');
       await flush();
       await focusSettles(focusedAction('share'));
       const call = send.calls.find((c) => c.type === 'dweb/base/share-app');
@@ -293,12 +293,12 @@ describe('home.library', () => {
     const send = makeSend({ 'apps/list': () => ({ ok: true, apps: structuredClone(seeded) }) });
     const { root, unmount } = await mountView(send, { dweb: true });
     try {
-      clickText(root, 'button', 'Reshare');   // shared app → "Reshare", not "Share"
+      clickText(root, 'button', '重新分享');   // shared app → "Reshare", not "Share"
       await flush();
       const input = need(root, '.library-share input', HTMLInputElement);
       expect(input.disabled).toBe(true);           // locked on reshare
       expect(input.value).toBe('ping-pong');
-      clickText(root, '.library-share button', 'Publish update');
+      clickText(root, '.library-share button', '发布更新');
       await flush();
       const call = send.calls.find((c) => c.type === 'dweb/base/share-app');
       expect(call?.slug).toBe('ping-pong');
@@ -316,8 +316,8 @@ describe('home.library', () => {
     const { root, unmount } = await mountView(send, { dweb: true });
     try {
       await flush();                               // let refreshUpdates resolve
-      expect(root.textContent).toContain('new version available');
-      clickText(root, 'button', 'Update');
+      expect(root.textContent).toContain('新版本可用');
+      clickText(root, 'button', '更新');
       await flush();
       await focusSettles(focusedAction('open'));
       const call = send.calls.find((c) => c.type === 'dweb/base/update-app');
@@ -344,10 +344,11 @@ describe('home.library', () => {
     const { root, unmount } = await mountView(send, { dweb: true });
     try {
       await flush();
-      clickText(root, 'button', 'Update');
+      clickText(root, 'button', '更新');
       await flush();
-      expect(root.textContent).toContain('The update was installed. Older shared bytes will be cleaned up');
-      expect(root.textContent.includes('update failed')).toBe(false);
+      expect(root.textContent).toContain('更新已安装。');
+      expect(root.textContent).toContain('旧的共享数据将在下次更新或删除时清理');
+      expect(root.textContent.includes('更新失败')).toBe(false);
     } finally { unmount(); }
   });
 
@@ -369,10 +370,10 @@ describe('home.library', () => {
     const { root, unmount } = await mountView(send, { dweb: true });
     try {
       await flush();
-      clickText(root, 'button', 'Update');
+      clickText(root, 'button', '更新');
       await flush();
-      expect(root.textContent).toContain('security audit entry could not be written');
-      expect(root.textContent).toContain('Older shared bytes will be cleaned up');
+      expect(root.textContent).toContain('其安全审计记录无法写入');
+      expect(root.textContent).toContain('旧的共享数据将在下次更新或删除时清理');
     } finally { unmount(); }
   });
 
@@ -391,14 +392,14 @@ describe('home.library', () => {
     try {
       await flush();
       expect(root.textContent).toContain('Improve sync');
-      clickText(root, 'button', 'Update');
+      clickText(root, 'button', '更新');
       await flush();
-      expect(root.textContent).toContain('will not overwrite');
-      clickText(root, 'button', 'Keep a fork & update');
+      expect(root.textContent).toContain('不会静默覆盖');
+      clickText(root, 'button', '保留分支副本并更新');
       await flush();
       const calls = send.calls.filter((c) => c.type === 'dweb/base/update-app');
       expect(calls.at(-1)?.strategy).toBe('fork');
-      expect(root.textContent).toContain('Kept your local work');
+      expect(root.textContent).toContain('已将您的本地工作保留为');
     } finally { unmount(); }
   });
 
@@ -414,7 +415,7 @@ describe('home.library', () => {
       const trigger = need(root, '.library-kebab', HTMLButtonElement);
       trigger.click();
       await flush();
-      clickText(root, '.library-menu-item', 'History & Git');
+      clickText(root, '.library-menu-item', '历史与 Git');
       await flush();
       expect(need(root, '.library-card').classList.contains('is-expanded')).toBe(true);
       expect(need(root, '.library-repository', HTMLElement).getAttribute('role')).toBe('region');
@@ -452,18 +453,18 @@ describe('home.library', () => {
       };
       await focusSettles(panelFocused);
       expect(focusDiagnosis()).toBe('panel-focused');
-      expect(root.textContent).toContain('1 uncommitted change');
+      expect(root.textContent).toContain('1 处未提交的更改');
       expect(root.textContent).toContain('checkpoint');
-      clickText(root, '.library-commit button', 'Diff');
+      clickText(root, '.library-commit button', '差异');
       await flush();
       expect(root.textContent).toContain('--- a/index.html');
-      clickText(root, '.library-commit button', 'Restore');
+      clickText(root, '.library-commit button', '恢复');
       await flush();
       expect(send.calls.some((c) => c.type === 'apps/repository/restore')).toBe(false);
-      clickText(root, '.library-commit button', 'Restore?');
+      clickText(root, '.library-commit button', '恢复？');
       await flush();
       expect(send.calls.some((c) => c.type === 'apps/repository/restore' && c.to === 'abcdef123456')).toBe(true);
-      need(root, 'button[title="Close history"]').click();
+      need(root, 'button[title="关闭历史"]').click();
       await flush();
       // Same re-query-inside-the-poll shape as the panel-focus assertion
       // above: the collapse redraw can replace the kebab node, so identity
@@ -489,16 +490,16 @@ describe('home.library', () => {
     try {
       need(root, '.library-kebab').click();
       await flush();
-      clickText(root, '.library-menu-item', 'History & Git');
+      clickText(root, '.library-menu-item', '历史与 Git');
       await flush();
-      clickText(root, '.library-commit button', 'Diff');
+      clickText(root, '.library-commit button', '差异');
       await flush();
       expect(root.textContent).toContain('working-tree-1');
 
-      clickText(root, '.library-repository-dirty button', 'Checkpoint');
+      clickText(root, '.library-repository-dirty button', '检查点');
       await flush();
       await flush();
-      clickText(root, '.library-commit button', 'Diff');
+      clickText(root, '.library-commit button', '差异');
       await flush();
       expect(root.textContent).toContain('working-tree-2');
       expect(send.calls.filter((call) => call.type === 'apps/repository/diff').length).toBe(2);
@@ -515,12 +516,12 @@ describe('home.library', () => {
     try {
       need(root, '.library-kebab').click();
       await flush();
-      clickText(root, '.library-menu-item', 'History & Git');
+      clickText(root, '.library-menu-item', '历史与 Git');
       await flush();
       const input = need(root, '.library-repository-dirty input', HTMLInputElement);
       input.value = 'Explain the renderer fix';
       input.dispatchEvent(new Event('input'));
-      clickText(root, '.library-repository-dirty button', 'Checkpoint');
+      clickText(root, '.library-repository-dirty button', '检查点');
       await flush();
       expect(send.calls.some((c) => c.type === 'apps/repository/commit' && c.message === 'Explain the renderer fix')).toBe(true);
     } finally { unmount(); }
@@ -530,7 +531,7 @@ describe('home.library', () => {
     const send = makeSend();
     const { root, unmount } = await mountView(send);
     try {
-      clickText(root, 'button', 'Open');
+      clickText(root, 'button', '打开');
       await flush();
       expect(send.calls.some((c) => c.type === 'apps/open' && typeof c.appId === 'string')).toBe(true);
     } finally { unmount(); }
@@ -539,7 +540,7 @@ describe('home.library', () => {
   it('empty catalog shows the build-one hint', async () => {
     const { root, unmount } = await mountView(makeSend({ 'apps/list': () => ({ ok: true, apps: [] }) }));
     try {
-      expect(root.textContent).toContain('No apps yet');
+      expect(root.textContent).toContain('还没有应用');
     } finally { unmount(); }
   });
 
@@ -550,7 +551,7 @@ describe('home.library', () => {
       // Snake Game (favorite) sorts first. Rename lives behind the kebab now.
       need(root, '.library-kebab').click();
       await flush();
-      clickText(root, '.library-menu-item', 'Rename');
+      clickText(root, '.library-menu-item', '重命名');
       await flush();
       const input = need(root, '.library-card input', HTMLInputElement);
       input.value = 'Renamed';
@@ -569,7 +570,7 @@ describe('home.library', () => {
     try {
       need(root, '.library-kebab').click();
       await flush();
-      clickText(root, '.library-menu-item', 'Rename');
+      clickText(root, '.library-menu-item', '重命名');
       await flush();
       const input = need(root, '.library-card input', HTMLInputElement);
       input.value = 'ShouldNotStick';
@@ -587,7 +588,7 @@ describe('home.library', () => {
     try {
       need(root, '.library-kebab').click();
       await flush();
-      clickText(root, '.library-menu-item', 'Delete');   // arms
+      clickText(root, '.library-menu-item', '删除');   // arms
       await flush();
       // Dismiss via an outside mousedown — the section-level closer disarms.
       document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
@@ -596,8 +597,8 @@ describe('home.library', () => {
       // Re-open: Delete is disarmed again ('Delete', not 'Delete?').
       need(root, '.library-kebab').click();
       await flush();
-      expect(byText(root, '.library-menu-item', 'Delete?')).toBeFalsy();
-      expect(byText(root, '.library-menu-item', 'Delete')).toBeTruthy();
+      expect(byText(root, '.library-menu-item', '删除？')).toBeFalsy();
+      expect(byText(root, '.library-menu-item', '删除')).toBeTruthy();
     } finally { unmount(); }
   });
 
@@ -605,11 +606,11 @@ describe('home.library', () => {
     const send = makeSend({ 'apps/favorite': () => ({ ok: false, error: 'nope' }) });
     const { root, unmount } = await mountView(send);
     try {
-      need(root, 'button[title="Favorite"]').click();   // Calculator (not fav)
+      need(root, 'button[title="收藏"]').click();   // Calculator (not fav)
       await flush();
       // Grid still rendered (inline banner, not a full error screen) and
       // the optimistic star reverted to outline (title back to 'Favorite').
-      expect(root.querySelector('button[title="Favorite"]')).toBeTruthy();
+      expect(root.querySelector('button[title="收藏"]')).toBeTruthy();
       expect(names(root).length).toBe(2);
       expect(root.textContent).toContain('nope');
     } finally { unmount(); }
@@ -621,7 +622,7 @@ describe('home.library', () => {
     try {
       need(root, '.library-kebab').click();
       await flush();
-      clickText(root, '.library-menu-item', 'Export');
+      clickText(root, '.library-menu-item', '导出');
       await flush();
       expect(send.calls.find((c) => c.type === 'export/artifact'))
         .toEqual({ type: 'export/artifact', kind: 'app', id: 'app-2' });
@@ -639,7 +640,7 @@ describe('home.library', () => {
     const { root, unmount } = await mountView(send);
     try {
       expect(root.textContent).toContain('boom');
-      need(root, 'button[title="Refresh"]').click();
+      need(root, 'button[title="刷新"]').click();
       await flush();
       // Recovered: grid shows and the error cleared (refresh resets it).
       expect(names(root)).toEqual(['Snake Game', 'Calculator']);

@@ -13,7 +13,6 @@ import { SessionsView } from './sessions-view.js';
 import { ActorIsolationBanner } from './actor-isolation-banner.js';
 import { openOptions } from '/shared/open-options.js';
 import { openHome } from '/shared/open-home.js';
-import { CHANNEL } from '/shared/channel-config.js';
 
 /** @typedef {import('../chat-reducer.js').ChatState} ChatState */
 /** @typedef {(msg: object) => Promise<any>} Send */
@@ -138,22 +137,9 @@ const TopBar = {
   view: ({ attrs: { state, send, optionsActive } }) => {
     const unlocked = state.vault.initialized && !state.vault.locked;
     return m('.topbar', [
-      // Brand cluster: the preview badge sits inline to the RIGHT of the
-      // wordmark, vertically centered (keeps the top bar thin). The hand-off
-      // animation still drives both — the wordmark self-deletes and the
-      // badge slides out together.
+      // Brand cluster: the wordmark hugs the left edge (keeps the top bar thin).
       m('.topbar-brand', [
         m(Wordmark, { optionsActive }),
-        // Channel indicator (§12): the preview package wears a small badge so
-        // nobody has to guess which peerd they're in ("why doesn't peerd
-        // have the dweb" — because it's the store package). CHANNEL is a
-        // build-time literal; this node is dead code in store artifacts.
-        CHANNEL === 'preview'
-          ? m('span.channel-badge', {
-              class: optionsActive ? 'is-exiting' : '',
-              title: 'peerd 预览版 — dweb 预览包',
-            }, '预览')
-          : null,
       ]),
       // Spacer BEFORE the actions: brand hugs the left edge, the action icons
       // right-align (owner call, 2026-06-12).

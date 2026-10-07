@@ -24,7 +24,7 @@ describe('sidepanel.chat-reducer confirm settles (§4e)', () => {
     });
     expect(s.pendingConfirm).toBe(null);
     expect(s.confirmEvents.length).toBe(1);
-    expect(s.confirmEvents[0].text).toBe('Not approved - no answer in two minutes.');
+    expect(s.confirmEvents[0].text).toBe('未批准 — 两分钟内没有答复。');
     expect(s.confirmEvents[0].sessionId).toBe('chat-1');
   });
 
@@ -34,7 +34,7 @@ describe('sidepanel.chat-reducer confirm settles (§4e)', () => {
         type: 'confirm/resolved', id: 'p1',
         outcome: { answer: 'no', cause, via: null, sessionId: 'chat-1' },
       });
-      expect(s.confirmEvents[0].text).toBe('Not approved - you stopped the turn.');
+      expect(s.confirmEvents[0].text).toBe('未批准 — 你停止了该轮次。');
     }
   });
 
@@ -44,7 +44,7 @@ describe('sidepanel.chat-reducer confirm settles (§4e)', () => {
       outcome: { answer: 'yes_once', cause: 'answer', via: 'home', sessionId: 'chat-1' },
     });
     expect(s.pendingConfirm).toBe(null);
-    expect(s.confirmEvents[0].text).toBe('Approved once, from the home tab.');
+    expect(s.confirmEvents[0].text).toBe('已批准一次，来自主页标签页。');
   });
 
   it('the answering surface never lines its own click', () => {
@@ -66,7 +66,7 @@ describe('sidepanel.chat-reducer confirm settles (§4e)', () => {
       outcome: { answer: 'no', cause: 'timeout', via: null, sessionId: 'chat-1' },
     });
     expect(s.pendingConfirm?.id).toBe('p2');   // p2 stays up
-    expect(s.confirmEvents[0].text).toBe('Not approved - no answer in two minutes.');
+    expect(s.confirmEvents[0].text).toBe('未批准 — 两分钟内没有答复。');
   });
 
   it('snapshot notes fold in, dedupe by id, and keep time order', () => {
@@ -88,7 +88,7 @@ describe('sidepanel.chat-reducer confirm settles (§4e)', () => {
     });
     expect(s.confirmEvents.length).toBe(2);
     expect(s.confirmEvents[0].id).toBe('p0');  // time-ordered, not append-ordered
-    expect(s.confirmEvents[0].text).toBe('Not approved - peerd wasn’t open to ask.');
+    expect(s.confirmEvents[0].text).toBe('未批准 — peerd 未打开，无法询问。');
     expect(s.confirmEvents[1].id).toBe('p1');
   });
 });

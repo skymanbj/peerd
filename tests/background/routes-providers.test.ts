@@ -194,3 +194,72 @@ describe('models/options + openrouter/models', () => {
     expect(await r['openrouter/models']()).toEqual({ ok: false, status: 401, error: 'invalid-key' });
   });
 });
+
+describe('provider/test live-model fallback', () => {
+  test('custom provider with unknown default model: fetches live models list for testing', async () => {
+    let calledModel: string | undefined;
+    const r = makeProviderRoutes(baseDeps({
+      listProviders: () => [
+        { name: 'custom-spark', label: 'Spark', defaultModel: 'unknown', vaultSecretName: 'custom_spark_key', liveModels: true },
+      ],
+      listProviderModels: async () => [{ model: 'xopqwen35v35b', label: 'Qwen' }],
+      callModel: async function* (args: any) { calledModel = args.model; yield { type: 'delta', text: 'hi' }; },
+    }));
+    const res = await r['provider/test']({ provider: 'custom-spark' });
+    expect(res.ok).toBe(true);
+    expect(calledModel).toBe('xopqwen35v35b');
+  });
+});
+
+describe('custom-provider/add and custom-provider/update baseUrl validation', () => {
+  test('custom-provider/add preserves full baseUrl paths', async () => {
+    let addedProvider: any = null;
+    const r = makeProviderRoutes(baseDeps({
+      kv: {},
+      addCustomProvider: async (_kv: any, provider: any) => { addedProvider = provider; return true; },
+      listProviders: () => [],
+      customSecretName: (n: string) => `custom_${n}_key`,
+      sanitizeProviderId: (l: string) => l.toLowerCase(),
+      isReservedName: () => false,
+      rebuildUserEndpoints: () => {},
+      registerProvider: () => {},
+      isCustomProvider: () => true,
+      makeOpenAiCompatAdapter: () => ({}),
+    }));
+    const res = await r['custom-provider/add']({
+      label: 'Spark',
+      baseUrl: 'https://maas-api.cn-huabei-1.xf-yun.com/v2/',
+      apiKey: 'sk-abcdefgh',
+      defaultModel: 'spark-model',
+    });
+    expect(res.ok).toBe(true);
+    expect(addedProvider.baseUrl).toBe('https://maas-api.cn-huabei-1.xf-yun.com/v2');
+  });
+
+  test('custom-provider/update preserves full baseUrl paths', async () => {
+    let updatedName = '';
+    let updatedPatch: any = null;
+    const r = makeProviderRoutes(baseDeps({
+      kv: {},
+      isCustomProvider: () => true,
+      updateCustomProvider: async (_kv: any, name: string, patch: any) => {
+        updatedName = name;
+        updatedPatch = patch;
+        return { name, ...patch };
+      },
+      listProviders: () => [{ name: 'spark', label: 'Spark', defaultModel: 'spark-model', vaultSecretName: 'custom_spark_api_key' }],
+      unregisterProvider: () => {},
+      makeOpenAiCompatAdapter: () => ({}),
+      registerProvider: () => {},
+      rebuildUserEndpoints: () => {},
+    }));
+    const res = await r['custom-provider/update']({
+      name: 'spark',
+      label: 'Spark New',
+      baseUrl: 'https://maas-api.cn-huabei-1.xf-yun.com/v2/',
+    });
+    expect(res.ok).toBe(true);
+    expect(updatedName).toBe('spark');
+    expect(updatedPatch.baseUrl).toBe('https://maas-api.cn-huabei-1.xf-yun.com/v2');
+  });
+});
