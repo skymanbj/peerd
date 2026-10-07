@@ -1,0 +1,107 @@
+// Channel-config generator — flattens packaging/default-settings.mjs for one
+// channel and emits extension/shared/channel-config.js (or the staged copy
+// inside a packaged artifact). This is the §3/§11 injection mechanism: the
+// channel flag and the channel's defaults become literal constants in
+// the shipped tree; the store artifact's copy has DWEB_ENABLED =
+// false, REMOTE_MODULE_IMPORTS_ENABLED = false, and NO dweb keys at all.
+//
+// The CHECKED-IN extension/shared/channel-config.js is the dev default
+// (preview channel) so the load-unpacked dev loop needs no build step.
+// CI verifies the checked-in copy is in sync (`bun run gen:dev` +
+// git diff --exit-code).
+//
+// CLI:
+//   bun packaging/gen-channel-config.ts --channel=preview [--browser=firefox] [--out=path]
+//   (no --out → writes extension/shared/channel-config.js)
+
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import {
+  EXTENSION_DIR, parseArgs, CONFIG_CHANNELS, BROWSERS,
+  type ConfigChannel, type Browser,
+} from './lib.ts';
+import { defaults } from './default-settings.mjs';
+
+const DEV_OUT = join(EXTENSION_DIR, 'shared', 'channel-config.js');
+
+export const dwebEnabledForTarget = (channel: ConfigChannel, browser?: Browser): boolean =>
+  channel === 'preview' && browser !== 'firefox';
+
+export const remoteModuleImportsEnabledForTarget = (channel: ConfigChannel, browser?: Browser): boolean =>
+  channel === 'preview';
+
+// Firefox extension module Workers cannot load generated child module URLs.
+// The packaged target selects a single linked entry there; Chrome keeps the
+// native module graph until the shared path has equivalent field coverage.
+export const notebookModuleLoaderForTarget = (browser?: Browser): 'blob-graph' | 'single-bundle' =>
+  browser === 'firefox' ? 'single-bundle' : 'blob-graph';
+
+export const flattenDefaults = (channel: ConfigChannel, browser?: Browser): Record<string, unknown> => {
+  const out: Record<string, unknown> = {};
+  for (const [key, perChannel] of Object.entries(defaults)) {
+    if (!dwebEnabledForTarget(channel, browser)
+        && (key === 'dwebEnabled' || key === 'dwebAgentEnabled')) continue;
+    const channels = Object.keys(perChannel);
+    for (const c of channels) {
+      if (!(CONFIG_CHANNELS as readonly string[]).includes(c)) {
+        throw new Error(`default-settings: key "${key}" has unknown channel "${c}"`);
+      }
+    }
+    // why the web→store fallback: the web tree inherits the store posture per
+    // key unless a key declares an explicit `web` value — so the schema doesn't
+    // triple every entry (the "don't proliferate divergence" rule above the
+    // defaults), and a new store key reaches the web build automatically.
+    if (channel in perChannel) out[key] = (perChannel as any)[channel];
+    else if (channel === 'web' && 'store' in perChannel) out[key] = (perChannel as any).store;
+  }
+  return out;
+};
+
+export const genChannelConfigSource = (channel: ConfigChannel, browser?: Browser): string => {
+  const flat = flattenDefaults(channel, browser);
+  const entries = Object.entries(flat)
+    .map(([k, v]) => `  ${k}: ${JSON.stringify(v)},`)
+    .join('\n');
+  // why the directive: this file is checked into the typed extension tree,
+  // so emit // @ts-check to keep it under the typecheck ratchet — and emit
+  // it FROM the generator so `bun run gen:dev` stays drift-clean (a
+  // hand-added directive would be stripped on regeneration; see CI).
+  return `// @ts-check
+// GENERATED FILE — do not edit. Source of truth: packaging/default-settings.mjs
+// (regenerate with \`bun run gen:dev\`; the packaging script regenerates the
+// staged copy per channel). The checked-in copy is the DEV default —
+// preview channel — so "load unpacked → refresh" needs no build step.
+//
+// why this exists: the store/preview split is decided at PACKAGE TIME. The
+// Dweb-disabled artifacts have DWEB_ENABLED = false and contain no dweb keys;
+// the dweb module itself is absent from those artifact trees. Core code gates dweb UI/calls on
+// DWEB_ENABLED and reads defaults from CHANNEL_DEFAULTS — never from
+// a runtime "which channel am I" probe, and never exposed to the agent or
+// to skills (spec §11: settings are the only abstraction).
+
+export const CHANNEL = ${JSON.stringify(channel)};
+export const DWEB_ENABLED = ${JSON.stringify(dwebEnabledForTarget(channel, browser))};
+export const REMOTE_MODULE_IMPORTS_ENABLED = ${JSON.stringify(remoteModuleImportsEnabledForTarget(channel, browser))};
+export const NOTEBOOK_MODULE_LOADER = ${JSON.stringify(notebookModuleLoaderForTarget(browser))};
+
+export const CHANNEL_DEFAULTS = Object.freeze(${'{'}
+${entries}
+${'}'});
+`;
+};
+
+const main = () => {
+  const args = parseArgs(process.argv.slice(2));
+  const channel = String(args.channel ?? 'preview') as ConfigChannel;
+  if (!(CONFIG_CHANNELS as readonly string[]).includes(channel)) throw new Error(`bad --channel=${channel}`);
+  const browser = args.browser === undefined ? undefined : String(args.browser) as Browser;
+  if (browser !== undefined && !(BROWSERS as readonly string[]).includes(browser)) {
+    throw new Error(`bad --browser=${browser}`);
+  }
+  const out = args.out ? String(args.out) : DEV_OUT;
+  mkdirSync(dirname(out), { recursive: true });
+  writeFileSync(out, genChannelConfigSource(channel, browser));
+  console.log(`wrote ${out} (channel=${channel}${browser ? ` browser=${browser}` : ''})`);
+};
+
+if (import.meta.main) main();

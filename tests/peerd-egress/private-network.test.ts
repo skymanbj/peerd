@@ -1,0 +1,123 @@
+import { describe, test, expect } from 'bun:test';
+import {
+  isCloudMetadataHost,
+  isPrivateOrLocalHost,
+} from '../../extension/peerd-egress/fetch/private-network.js';
+import {
+  isCloudMetadataHost as sharedIsCloudMetadataHost,
+  isPrivateOrLocalHost as sharedIsPrivateOrLocalHost,
+} from '../../extension/shared/private-network.js';
+
+test('the egress compatibility surface re-exports the shared policy', () => {
+  expect(isPrivateOrLocalHost).toBe(sharedIsPrivateOrLocalHost);
+  expect(isCloudMetadataHost).toBe(sharedIsCloudMetadataHost);
+});
+
+describe('isPrivateOrLocalHost — BLOCKS private / loopback / link-local', () => {
+  const blocked = [
+    // hostnames
+    'localhost', 'LOCALHOST', 'foo.localhost',
+    'localhost.localdomain', 'api.localhost.localdomain',
+    'ip6-localhost', 'ip6-loopback',
+    'local', 'printer.local', 'db.LOCAL',
+    'home.arpa', 'router.home.arpa',
+    // IPv4 dotted
+    '127.0.0.1', '127.255.255.254', '10.0.0.1', '10.255.255.255',
+    '172.16.0.1', '172.31.255.255', '192.168.0.1', '192.168.1.1',
+    '169.254.0.1', '169.254.169.254', // ← cloud metadata endpoint
+    '100.100.100.200', '168.63.129.16',
+    '0.0.0.0',
+    '224.0.0.1', '239.255.255.255',
+    // IPv4 encoded forms (the researcher's second move)
+    '2130706433',          // decimal 127.0.0.1
+    '0x7f000001',          // hex 127.0.0.1
+    '0177.0.0.1',          // octal first octet
+    '127.1',               // short form → 127.0.0.1
+    '127.0.1',             // short form → 127.0.0.1
+    '3232235777',          // decimal 192.168.1.1
+    // IPv6
+    '::1', '[::1]', '::', 'fc00::1', 'fd12:3456::1', 'fe80::1', 'fe80::abcd',
+    'fe80::', 'febf::1', '0:0:0:0:0:0:0:1', // link-local edge + fully-expanded loopback
+    '::ffff:192.168.1.1',  // IPv4-mapped private (dotted)
+    '::ffff:127.0.0.1',
+    // IPv4-mapped in the COMPRESSED-HEX form new URL() actually produces —
+    // the regression these tests guard. Dotted ::ffff:127.0.0.1 normalizes
+    // to ::ffff:7f00:1, which the old dotted-only regex never matched.
+    '::ffff:7f00:1',       // = 127.0.0.1 loopback
+    '::ffff:a9fe:a9fe',    // = 169.254.169.254 cloud metadata
+    '[::ffff:7f00:1]',     // bracketed (as URL.hostname yields it)
+    '::ffff:0a00:0001',    // = 10.0.0.1
+    '::ffff:c0a8:0101',    // = 192.168.1.1
+    '64:ff9b::a9fe:a9fe',  // NAT64 well-known prefix embedding 169.254.169.254
+    '64:ff9b:1::1',        // local-use NAT64 prefix
+    'fec0::1', 'feff::1',  // deprecated site-local range
+    'ff02::1', 'ffff::1',  // IPv6 multicast
+    'fd00:ec2::254',       // AWS metadata IPv6 endpoint
+    '::7f00:1',            // IPv4-compatible (deprecated) → 127.0.0.1
+  ];
+  for (const h of blocked) {
+    test(`blocks ${h}`, () => expect(isPrivateOrLocalHost(h)).toBe(true));
+  }
+});
+
+describe('isPrivateOrLocalHost — ALLOWS public hosts', () => {
+  const allowed = [
+    'example.com', 'api.anthropic.com', 'huggingface.co', 'en.wikipedia.org',
+    '8.8.8.8', '1.1.1.1', '93.184.216.34', // public IPs
+    '172.15.255.255', '172.32.0.1',         // just OUTSIDE 172.16/12
+    '11.0.0.1', '126.0.0.1', '128.0.0.1',   // adjacent to private ranges, public
+    '169.253.0.1', '169.255.0.1',           // adjacent to link-local, public
+    '223.255.255.255',                      // adjacent to multicast, public
+    '2606:4700:4700::1111',                  // public IPv6 (Cloudflare)
+    '2001:4860:4860::8888',                   // public IPv6 (Google DNS)
+    '64:ff9b::808:808',                       // NAT64 embedding PUBLIC 8.8.8.8 — must NOT over-block
+    '::ffff:808:808',                         // IPv4-mapped PUBLIC 8.8.8.8
+    'mylocalshop.com', 'notlocalhost.com', 'local.example.com', // substrings, not suffixes
+    'service.internal', 'metadata.google.internal.example.com',
+  ];
+  for (const h of allowed) {
+    test(`allows ${h}`, () => expect(isPrivateOrLocalHost(h)).toBe(false));
+  }
+});
+
+describe('isPrivateOrLocalHost — robustness', () => {
+  test('handles empty / non-string / trailing dot', () => {
+    expect(isPrivateOrLocalHost('')).toBe(false);
+    expect(isPrivateOrLocalHost(undefined as any)).toBe(false);
+    expect(isPrivateOrLocalHost(null as any)).toBe(false);
+    expect(isPrivateOrLocalHost('localhost.')).toBe(true);   // FQDN root dot
+    expect(isPrivateOrLocalHost('127.0.0.1.')).toBe(true);
+    expect(isPrivateOrLocalHost('[::1].')).toBe(true);
+  });
+  test('a numeric-looking but invalid host is not treated as a private IP', () => {
+    expect(isPrivateOrLocalHost('999.999.999.999')).toBe(false); // out of range → not parsed as IP
+    expect(isPrivateOrLocalHost('1e10')).toBe(false);            // not an integer literal
+  });
+});
+
+describe('isCloudMetadataHost', () => {
+  const blocked = [
+    '169.254.169.254',
+    '100.100.100.200',
+    '168.63.129.16',
+    'fd00:ec2::254',
+    '[fd00:ec2::254]',
+    'metadata.google.internal',
+    'METADATA.GOOGLE.INTERNAL.',
+  ];
+  for (const host of blocked) {
+    test(`recognizes ${host}`, () => expect(isCloudMetadataHost(host)).toBe(true));
+  }
+
+  const allowed = [
+    'metadata.google.internal.example.com',
+    'notmetadata.google.internal',
+    'service.internal',
+    '169.254.169.253',
+  ];
+  for (const host of allowed) {
+    test(`does not broaden metadata matching to ${host}`, () => {
+      expect(isCloudMetadataHost(host)).toBe(false);
+    });
+  }
+});

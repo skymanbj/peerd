@@ -1,0 +1,295 @@
+// Channel-aware default settings — the single schema both channels'
+// CHANNEL_DEFAULTS are generated from. PACKAGE-TIME INPUT ONLY: nothing in
+// the extension imports this file; packaging/gen-channel-config.ts flattens it
+// per channel into extension/shared/channel-config.js (and into the staged
+// copy of each artifact). See PACKAGING.md §"Channel-aware defaults".
+//
+// Each key maps to { store, preview } values. A key present for only one
+// channel is OMITTED from the other channel's CHANNEL_DEFAULTS entirely —
+// there is no runtime conditional; the field simply doesn't exist in
+// that package.
+//
+// THE PRINCIPLE (spec §11): safety defaults stay strict across both
+// channels; only FRICTION defaults relax on preview. Egress allowlist
+// posture, the sensitive-site denylist, vault encryption — none of those
+// are settings here, and none may become channel-conditional. The
+// channel boundary is friction tolerance, not safety floor.
+//
+// Also: don't proliferate channel-conditional values. Every store/preview
+// divergence is a small permanent maintenance tax — add one only when it
+// genuinely serves the audience split. Most keys below are deliberately
+// identical.
+//
+// Migration semantics are Option A (spec §11): a stored value always wins
+// over CHANNEL_DEFAULTS, even if it happens to equal an old default. New
+// defaults reach existing users only when they reset the setting.
+
+export const defaults = {
+  // (backgroundTabsEnabled is GONE, 2026-06-12: agent-opened tabs are
+  // background ALWAYS — the agent never steals focus. No toggle, no shim.)
+
+  // Voice stays opt-in on BOTH channels: enabling triggers a large model
+  // download (Moonshine WASM) and a mic-permission flow. Auto-enabling
+  // that on preview wouldn't serve technical users, it would just
+  // surprise them. (Deliberate deviation from the spec's illustrative
+  // "voice auto-on for preview" example.)
+  voiceEnabled: { store: false, preview: false },
+  // why: peerd ships exactly ONE Moonshine model — `base`, the more
+  // accurate of upstream's two real variants (there is no 'small'/'tiny'
+  // shipped). The key is retained for storage back-compat; any other
+  // value is coerced to `base` at every read (normalizeVariant). The old
+  // 'small' default here was the source of the recurring "Unknown voice
+  // model variant" crash — it pinned a model that doesn't exist.
+  voiceVariant: { store: 'base', preview: 'base' },
+  // why: Web Speech (browser SpeechRecognition) is the DEFAULT engine —
+  // instant, no download. Moonshine (~250 MB WASM, fully on-device) is an
+  // OPT-IN PRIVACY UPGRADE, not the auto pick, even when vendored + SRI-pinned.
+  //   'auto'       — prefer Web Speech; fall back to Moonshine only when Web
+  //                  Speech is unavailable (Firefox has no SpeechRecognition).
+  //   'web-speech' — force the browser engine (cloud-routed on most browsers).
+  //   'moonshine'  — force local Moonshine; the privacy choice.
+  // 'auto' on both channels: engine choice is a friction/privacy preference,
+  // not a safety floor. Unknown stored values coerce to 'auto' (normalizeEngine).
+  voiceEngine: { store: 'auto', preview: 'auto' },
+  voiceSilenceMs: { store: 1500, preview: 1500 },
+  voiceOnboardingDismissed: { store: false, preview: false },
+
+  // OCR for scanned PDFs (read_pdf's heavy path). Opt-in on BOTH channels for
+  // the same reason as voice: enabling triggers a multi-MB engine download.
+  // The default reader (pdf.js text layer) needs no download and is always on;
+  // this flag only governs the on-device OCR engine for image-only PDFs.
+  ocrEnabled: { store: false, preview: false },
+
+  // Verbose VM diagnostics (Settings → Behavior). OFF by default on BOTH
+  // channels — its own UI copy already calls it "extra noise". On, it surfaces
+  // the one-time wrapper install/verify output in the WebVM terminal at boot;
+  // it does NOT trace the shell (no `set -x` — that used to leak peerd's
+  // internal markers + bridge plumbing into every interactive command). The
+  // verify results reach the boot LOG regardless, so debugging keeps its signal.
+  devMode: { store: false, preview: false },
+
+  // why: extended thinking renders a collapsible "Reasoning" section —
+  // the premium feel. On for everyone.
+  reasoningEnabled: { store: true, preview: true },
+
+  // Anthropic output_config.effort. 'medium' by owner call (2026-06-12):
+  // in a browser harness, long invisible deliberation reads as a hang —
+  // medium trades some up-front reasoning depth for earlier, visible
+  // tool action. The chat mode-row dial raises it per task.
+  reasoningEffort: { store: 'medium', preview: 'medium' },
+
+  // The web actor's ACTION surface. Preview/dev uses Playwright-shaped JS in a
+  // sealed worker; store remains on discrete tools while the code lane earns
+  // broad field evidence. A runtime without the offscreen worker host falls
+  // back to tools even when its package default says code. Per-user stored
+  // values still win; unknown values coerce to tools.
+  webActorActionSurface: { store: 'tools', preview: 'code' },
+
+  // Empty on fresh install — NO provider is assumed. The first provider the
+  // user configures auto-activates (provider/setKey for keyed providers,
+  // ensureActiveProvider for a reachable keyless daemon at first chat). Until
+  // then the Settings "Default model for new chats" section stays hidden and
+  // chats can't start, instead of silently defaulting to Anthropic with no key.
+  providerName: { store: '', preview: '' },
+  providerModel: { store: '', preview: '' },
+
+  // Ollama daemon base URL (issue #104). Default is the local loopback; a user
+  // running Ollama on a separate box (a dedicated Mac mini, a LAN server) points
+  // this at it (e.g. http://192.168.1.4:11434). Validated to an http(s) origin
+  // at write (settings-patch), added to the egress allowlist, and reached by the
+  // adapter for /v1/chat/completions, /api/tags, and /api/show.
+  ollamaHost: { store: 'http://localhost:11434', preview: 'http://localhost:11434' },
+
+  // Curated OpenRouter model ids the chat model-picker offers (OpenRouter is
+  // a gateway to hundreds of models — too many to dump in a dropdown, so the
+  // user checks the ones they want in Settings). Empty = fall back to the
+  // small built-in OpenRouter catalog until they curate. Same on both channels.
+  openrouterModels: { store: [], preview: [] },
+
+  // Whether tool contexts get the CDP pool (snapshot refs, page_exec on
+  // Trusted-Types sites, page_keys, runner pre-seeding). The `debugger`
+  // PERMISSION is required at install where it ships — Chrome refuses to
+  // treat it as optional ("Permission 'debugger' cannot be listed as
+  // optional") — so the user-facing control is this SETTING.
+  //
+  // Channel-split (2026-06-13 directive): CDP is the DEFAULT only in
+  // preview/dev; the store package is scripting-first. The initial store
+  // Chrome package ships WITHOUT the `debugger` permission (gen-manifest.ts
+  // STORE_STRIPPED_PERMISSIONS), so advancedAutomationOn() is hard-false
+  // there regardless of this value — but we set store:false EXPLICITLY so
+  // that when CDP is re-added to a store update post-approval, users opt in
+  // via Settings → Advanced rather than being silently auto-enrolled.
+  // preview/dev stay ON (the quality path for technical users). Firefox has
+  // no chrome.debugger API, so the setting is moot there on either channel.
+  advancedAutomationEnabled: { store: false, preview: true },
+
+  // Watch mode (background/watch-mode.js): the OPT-IN inverse of DESIGN-12's
+  // no-focus-steal. OFF by default — peerd drives its tab in the background so
+  // it never interrupts you. Toggle it on from the side-panel top bar and peerd
+  // brings the agent's current tab to the foreground and FOLLOWS it as the agent
+  // moves between tabs, so you watch the real page live (the browser is the
+  // viewer — no screenshot/capture, no new permission, both channels). Off both
+  // channels: watching is a per-moment choice, not a default posture.
+  watchAgentTab: { store: false, preview: false },
+
+  // Which surface the toolbar icon opens — peerd's front door
+  // (background/panel-affordance.js). 'panel' (owner call, 2026-07-29): the
+  // chat pulls into the side panel / sidebar NEXT TO the page the user is on;
+  // the full-page home taking over a whole tab on first click (often straight
+  // into the vault gate) read as heavyweight. 'home' restores the original
+  // full-page-first model (DESIGN-12): home first, panel once home is open.
+  // A friction preference, not a safety posture — identical on both channels.
+  frontDoorView: { store: 'panel', preview: 'panel' },
+
+  // Web actor model override. '' is NO override — the web actor resolves to
+  // the active provider's fast default (Haiku on Anthropic via
+  // adapter.defaultRunnerModel; resolveRunnerModel), NOT the chat model. So out
+  // of the box page reads ride Haiku while chat keeps the stronger model. A
+  // non-empty value pins a specific SAME-PROVIDER model id. Once the local
+  // WebGPU runner is downloaded it becomes the resolved default here
+  // automatically. The KEY stays `runnerModel` for saved-settings continuity.
+  // Same on both channels.
+  runnerModel: { store: '', preview: '' },
+
+  // Prewalk (loop/prewalk.js): a goal run opens on the chat's (frontier)
+  // model with a hidden plan-first nudge, then hands the LIVE context to a
+  // cheap executor model at the first landed action — todo list ticking, one
+  // valid move already in history. OFF by default on BOTH channels until the
+  // in-extension Lab's baseline-vs-prewalk arms validate spend/pass/speed
+  // (home/eval-section.js); flip deliberately, not by shipping.
+  prewalkEnabled: { store: false, preview: false },
+
+  // Engine-actor prewalk (loop/prewalk-controller.js): the three engine actor
+  // kinds (VM/Notebook/App) are minted on the chat's (frontier) model. With
+  // this on, an engine actor runs its FIRST turn on that model, then swaps to
+  // the cheap executor for every later turn — lower cost on multi-turn engine
+  // work (a VM build, a notebook iteration) at held-or-better quality. Shares
+  // the prewalkExecutorModel pin below. OFF by default on BOTH channels until
+  // the Lab's engine-actor A/B validates it (home/eval-section.js).
+  enginePrewalkEnabled: { store: false, preview: false },
+
+  // Prewalk executor override. '' = no pin — resolve the active provider's
+  // fast default (the same defaultRunnerModel rung the web actor rides, e.g.
+  // Haiku on Anthropic). A non-empty value pins a SAME-PROVIDER model id
+  // (cross-provider executors are a deliberate later step — keys, failover
+  // and pricing are provider-scoped). Shared by goal-run and engine-actor prewalk.
+  prewalkExecutorModel: { store: '', preview: '' },
+
+  // Cost telemetry: the meter is always on; the hard limit is opt-in.
+  spendLimitUsd: { store: 0, preview: 0 },
+  pricingOverrides: { store: {}, preview: {} },
+
+  // Confirm before NON-GET web egress (POST/PUT/PATCH/DELETE) — from both the
+  // call_api tool and the WebVM's HTTP bridge. ON by default on BOTH channels:
+  // this is the anti-exfiltration gate (a prompt-injected agent can't silently
+  // POST in-context data to an arbitrary host), so it's a safety floor, not a
+  // friction knob (spec §11 — does not diverge). The user can approve a single
+  // write or all writes for the session; turning it OFF is a deliberate,
+  // risk-acknowledged choice in Settings. GET reads are never gated.
+  confirmWebWrites: { store: true, preview: true },
+
+  // #241 — force an UNTRUSTED actor's reply (the web/API kinds, the ones that
+  // ingest hostile page bytes) through a strict JSON envelope that deterministic
+  // code validates before the orchestrator sees it. Turns a SOFT prompt fence
+  // into a STRUCTURAL boundary: the actor cannot emit free text adjacent to the
+  // fence markers, so a "double-escape" payload has no channel.
+  //
+  // OFF on both channels for now, and deliberately so: it changes the web
+  // actor's output CONTRACT (prompt half + validator are one switch —
+  // peerd-runtime/loop/system-prompt.js SCHEMA_REPLY_RULE arms with it), and a
+  // model that drifts from the envelope has its reply dropped. It ships wired
+  // and one flip from live so it can be exercised end-to-end; the default moves
+  // only after that field evidence, not before.
+  schemaValidatedReplies: { store: false, preview: false },
+
+  // Auto-memory: when a session wraps up (archive / switch-away with
+  // real substance), a cheap clean-context call proposes durable-note
+  // SUGGESTIONS the user approves in Context → Memory — nothing is
+  // auto-written. Default ON on both channels: the gate this switch
+  // controls is the background model spend, not memory writes (those
+  // always require the per-note approval), and the calls respect
+  // spendLimitUsd. Not a safety divergence candidate.
+  autoMemoryEnabled: { store: true, preview: true },
+
+  // ── Resilience ──────────────────────────────────────────────────────
+  // Auto-resume a turn the browser session reclaimed mid-flight. MV3
+  // evicts the service worker aggressively, so a long turn can die between
+  // the model call and a durable end state; the transcript is persisted
+  // per-delta but nothing re-drives it. ON: reopening the chat (or
+  // unlocking the vault) continues an INTERRUPTED turn from where it left
+  // off. Only fires on genuine infrastructure interruptions (a user Stop
+  // is never resumed), at most once per dead turn, and the continuation
+  // respects spendLimitUsd. Not a safety divergence — same on both channels.
+  autoResumeInterruptedTurns: { store: true, preview: true },
+
+  // Provider failover (switch-and-continue). When the active provider stays
+  // overloaded past the adapter's own retries, or returns a HARD usage
+  // limit (out of credit / over a cap), switch to a configured fallback
+  // provider and keep the turn going rather than failing it. The switch
+  // only ever happens BEFORE any model output streamed (never mid-answer).
+  // ON by default, but a no-op until the user lists a fallback below — so
+  // out of the box behavior is unchanged.
+  providerFailoverEnabled: { store: true, preview: true },
+
+  // Ordered fallback PROVIDER names tried when failover fires (each uses
+  // that provider's default model; requires its own key/daemon). Empty =
+  // no failover. Same on both channels.
+  providerFallbacks: { store: [], preview: [] },
+
+  // User-added OpenAI-compatible provider configs (name/label/baseUrl/
+  // defaultModel/apiFormat). The AUTHORITATIVE store is the KV key
+  // `custom_providers.v1` (peerd-provider/custom-providers.js); this settings
+  // key exists only so export/import and settings-patch normalization carry
+  // the same shape. Same on both channels.
+  customProviders: { store: [], preview: [] },
+
+  // Idle vault auto-lock, in milliseconds. 0 = never (the unwrapped DK
+  // stays live until SW death / browser close). 45min on BOTH channels —
+  // this is a safety default, not a friction default, so it does not
+  // diverge (spec §11). Re-unlock is one passkey tap once PRF is enrolled.
+  // The SW applies it via vault.setAutoLockMs() in loadSettings().
+  vaultAutoLockMs: { store: 2700000, preview: 2700000 },
+
+  // Audit-log retention cap (entry count; oldest pruned first, amortized
+  // on append — peerd-egress/audit/retention.js). NOT a user setting:
+  // the SW reads it straight from CHANNEL_DEFAULTS at audit-log
+  // construction, so stored settings never override it; it lives here so
+  // a channel COULD diverge. Retention depth isn't a safety floor
+  // (the log is local-only diagnostics with capped reads everywhere), so
+  // divergence would be legal — but nothing needs one today.
+  auditLogMaxEntries: { store: 20000, preview: 20000 },
+
+  // ── preview-only keys ──────────────────────────────────────────────
+  // Self-update check at startup (background/update-check.js). Preview
+  // installs are self-hosted (update_url → the peerd.ai feeds → GitHub
+  // release artifacts), and peerd's offscreen keepalive holds the MV3 SW
+  // alive - the exact state where Chrome parks a downloaded extension
+  // update waiting for an "idle" that never comes. ON by default on
+  // preview: testers should just be current. Chrome checks + reloads when
+  // nothing is in flight; Firefox (no requestUpdateCheck API) reads the
+  // feed and offers the XPI in a notice. Store packages omit the key
+  // entirely - store updates belong to the store; dev (load-unpacked) has
+  // no update_url, so the check is a structural no-op there.
+  autoUpdateEnabled: { preview: true },
+
+  // Dweb participation is ON BY DEFAULT on the dev/preview package (owner
+  // call, 2026-06-13 — supersedes the earlier "opt-in even on preview",
+  // spec §12). Preview ships to contributors and early testers; making
+  // them toggle dweb on before the demo is pure friction, and the channel
+  // boundary IS friction tolerance, not a safety floor (see the file
+  // header) — same posture as `advancedAutomationEnabled: { preview: true }`. NOT a safety
+  // relaxation: the dweb module ships only where the preview target has a mesh
+  // host. Other packages prune it and omit this key from CHANNEL_DEFAULTS.
+  // Identity needs an unlocked vault, and
+  // NOTHING connects until the user explicitly joins a room (the bridge's
+  // consent gate). On = the dweb UI is live and the commons opens without
+  // a pre-step; it does not auto-connect anywhere.
+  dwebEnabled: { preview: true },
+
+  // The DWEB AGENT — the mesh-operator actor (a persistent, keyless envoy that
+  // absorbs the dweb tools and monitors inbound mesh traffic). OPT-IN even on
+  // preview: an agent that can be woken by peers is a posture change the user
+  // must choose, not inherit. Only offered when dwebEnabled is on (nested
+  // toggle); the store build prunes it with the rest of the dweb keys.
+  dwebAgentEnabled: { preview: false },
+};

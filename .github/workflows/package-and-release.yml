@@ -1,0 +1,1008 @@
+# Dual-distribution CI (PACKAGING.md):
+#
+#   every push/PR   → tests, lint, dweb-boundary check, generated-
+#                     file drift check, then the FULL 2-channel × 2-browser
+#                     artifact matrix (store artifacts are verified to
+#                     contain zero dweb traces as part of packaging).
+#   DRAFT PRs       → the browser tier (in-browser Chrome, Firefox/Gecko,
+#                     e2e, visual, two-peer, packaged page boot) is SKIPPED
+#                     so iteration costs only the fast lanes. Marking the PR
+#                     ready for review re-runs the workflow with the full
+#                     tier on the current head; branch protection can require
+#                     those jobs and the requirement bites exactly at merge
+#                     time, since a draft cannot merge. Pushes to main still
+#                     run everything.
+#   tag push v*     → additionally: signed preview artifacts, a GitHub
+#                     Release titled peerd-preview-v<X.Y.Z> with the
+#                     preview artifacts + update feeds attached, then a
+#                     peerd-site dispatch to publish the feeds.
+#
+# Store uploads (Chrome Web Store / AMO) stay MANUAL — download the
+# verified store artifacts from the release run and submit them after QA.
+#
+# Signing secrets used by the release job (Settings → Secrets → Actions):
+#   CRX_PRIVATE_KEY   contents of key.pem (the CRX preview signing key —
+#                     same key forever, or every preview install breaks)
+#   AMO_JWT_ISSUER    addons.mozilla.org API credentials used by
+#   AMO_JWT_SECRET    `web-ext sign` for the Firefox preview package
+# Secret used by the notification job (Settings → Environments →
+# release-notify; leave that environment without required reviewers):
+#   PEERD_SITE_DISPATCH_TOKEN  fine-grained token scoped only to the private
+#                     NotASithLord/peerd-site repo with Contents:write. The
+#                     isolated notify-site job fails visibly if it is absent
+#                     and can be retried without replaying AMO signing. Its
+#                     separate unprotected environment scopes the credential
+#                     without asking for a second release approval.
+
+name: package-and-release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  # why explicit types: ready_for_review is NOT in the default set, and it is
+  # the event that turns a draft into a mergeable PR. Without it, the browser
+  # jobs below would stay skipped on the head that branch protection inspects.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      security_read_only:
+        description: 'Run candidate security validation without any write-capable jobs'
+        type: boolean
+        default: false
+      security_release_sha:
+        description: 'Bind an automated security release dispatch to this exact merge commit'
+        type: string
+        default: ''
+
+# Default the workflow token to read-only; jobs that write (visual's diff
+# branch + PR comment, release's assets) elevate per-job. why: the default
+# GITHUB_TOKEN grant is workflow-wide, so one compromised step in ANY job
+# could otherwise push refs or rewrite releases.
+permissions:
+  contents: read
+
+# why these pins: two constraints at once.
+#   1. Node-24 runtime — every action below is the first major of its line
+#      that targets node24 (clears GitHub's Node-20 deprecation warnings; no
+#      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 shim. This is GitHub's *action*
+#      runtime — peerd's own tooling is 100% Bun).
+#   2. Immutable SHAs, not tags — a major tag (`@v5`) is a mutable ref the
+#      action publisher can move; a moved tag means arbitrary code running in
+#      release CI. Every third-party action is pinned to a full commit SHA
+#      with the human-readable version in a trailing comment (the format
+#      Dependabot understands and keeps updated — see .github/dependabot.yml).
+#      When bumping: resolve the new tag with
+#      `git ls-remote https://github.com/<owner>/<repo> 'refs/tags/<tag>^{}'`
+#      (fall back to the bare tag ref when there is no ^{} line) and update
+#      the comment to match.
+jobs:
+  test:
+    # Keep this job's display name stable — it predates the packaging matrix
+    # and may be referenced by branch-protection required checks.
+    name: bun test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden runner (audit egress and source writes)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.9"
+      - run: bun install --frozen-lockfile
+      - name: Run functional suite and generate passing-count badge
+        run: bun run test:functional:badge
+      - name: Functional test badge in sync
+        run: |
+          git diff --exit-code badges/functional-tests.json || {
+            echo '::error::badges/functional-tests.json is stale - run `bun run gen:badge:functional` and commit it.'
+            exit 1
+          }
+      # The red-team catalog is pure Bun (no browser), so its badge rides the
+      # same job. The suite above already gates every scenario; this records how
+      # many hostile probes the defenses blocked while doing it.
+      - name: Run the red-team catalog and generate its blocked-probe badge
+        run: bun run gen:badge:red-team
+      - name: Red-team badge in sync
+        run: |
+          git diff --exit-code badges/red-team.json || {
+            echo '::error::badges/red-team.json is stale - run `bun run gen:badge:red-team` and commit it (and `bun run red-team:report` to refresh the matrix).'
+            exit 1
+          }
+
+  checks:
+    name: lint + boundary + drift
+    runs-on: ubuntu-latest
+    # addons-linter currently depends on an image parser with a known infinite
+    # loop. This bounds a crafted PR asset until upstream publishes a fix.
+    timeout-minutes: 15
+    steps:
+      - name: Harden runner (audit egress and source writes)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.9"
+      - run: bun install --frozen-lockfile
+      - name: ESLint
+        run: bun run lint
+      - name: Typecheck (bun suite + // @ts-check extension files)
+        run: bun run typecheck
+      - name: Typecheck coverage floor (no regressions)
+        run: bun run check:tscheck
+      - name: Coverage badges (well-formed; in-browser lanes agree on the graph)
+        run: bun run check:badges
+      # A moved major tag is arbitrary code in a job holding this checkout, and
+      # in release CI, the signing secrets. The pins were already the rule and
+      # the comment; this is the gate.
+      - name: Action pins (every third-party action at a full commit SHA)
+        run: bun run check:actions
+      - name: Dweb import boundary
+        run: bun run check:boundary
+      - name: Packaged import graph (no pruned-but-imported file black-screens a page)
+        run: bun run check:imports
+      # Static Firefox package gate: AMO validation and the guarded Chrome-only
+      # API inventory. The separate firefox-runtime job installs the Store XPI
+      # and runs the shared browser suite in Gecko.
+      - name: Firefox package lint (AMO validator; no unguarded Chrome-only API)
+        run: bun run check:firefox
+      - name: Doc path references (top-level docs point at real files)
+        run: bun run check:docpaths
+      - name: Source hygiene (no control bytes / tracked symlinks in source)
+        run: bun run check:hygiene
+      - name: Copy hygiene (no new em dashes / assistant authorship markers)
+        env:
+          COPY_HYGIENE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bun run check:copy
+      - name: Vendor integrity (extension/vendor/ matches vendor.lock.json)
+        run: bun run check:vendor
+      - name: Security invariants (manifest surface / dynamic code / message hosts)
+        run: bun run check:invariants
+      # The web target: stage it fresh from live source, then prove the
+      # assembled tree is import-closed (check-web-boundary auto-runs inside
+      # package:web; the explicit second run keeps the gate visible in logs).
+      # This is what lets the web tree inherit upstream safely — an escape
+      # introduced by a PR fails HERE instead of rotting the staged library.
+      - name: Web target build (from live source)
+        run: bun run package:web
+      - name: Web import-closure boundary
+        run: bun run check:web
+      - name: Generated-file drift (dev manifest + channel-config + tscheck and supply-chain badges)
+        run: |
+          bun run gen:dev
+          git diff --exit-code extension/manifest.json extension/shared/channel-config.js badges/tscheck.json badges/vendor-integrity.json badges/actions-pinned.json badges/no-build.json || {
+            echo '::error::A generated file (manifest.json, channel-config.js, or a badges/*.json written by gen:dev) is out of sync with its generator. Run `bun run gen:dev` and commit.'
+            exit 1
+          }
+      # No visual images are tracked: each run renders its own reference from the
+      # merge-base source (scripts/cdp/visual-vs-base.mjs). A PNG under
+      # scripts/cdp/ is therefore always a mistake - a stale baseline someone
+      # re-added, or a capture committed by accident.
+      # why a single `*` and not `**/`: git pathspec globbing is wildmatch
+      # WITHOUT FNM_PATHNAME, so `*` already crosses `/` while `**/` requires at
+      # least one intermediate directory. `scripts/cdp/**/*.png` therefore misses
+      # scripts/cdp/panel.png - a capture dropped next to the scripts, which is
+      # the likeliest way one lands here at all.
+      - name: No screenshots tracked in the repo
+        run: |
+          if git ls-files -- 'scripts/cdp/*.png' | grep -q .; then
+            echo '::error::Screenshots are tracked under scripts/cdp/ - this repo stores no baseline images; see scripts/cdp/visual-vs-base.mjs.'
+            git ls-files -- 'scripts/cdp/*.png'
+            exit 1
+          fi
+          echo 'no tracked screenshots under scripts/cdp/'
+
+  # Additive job — existing job names above/below are referenced by
+  # branch-protection required checks; this one can be added to that
+  # list once it has a green history.
+  inbrowser:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: in-browser tests (headless Chrome)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden runner (audit egress and source writes)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.9"
+      - uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
+        id: chrome
+        with:
+          chrome-version: stable
+      - name: Run in-browser suite over CDP and generate its passing-count badge
+        # why bun, not node: the CDP harness imports only node:* builtins and
+        # uses global WebSocket/fetch — all provided by bun — so the whole
+        # toolchain stays Bun (no Node install). Verified 586/0 under bun.
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: bun run gen:badge:inbrowser
+      - name: In-browser Chrome badge in sync
+        run: |
+          git diff --exit-code badges/inbrowser-chrome.json || {
+            echo '::error::badges/inbrowser-chrome.json is stale - run `bun run gen:badge:inbrowser` and commit it.'
+            exit 1
+          }
+
+  # Runs the Firefox artifact, not only its manifest and AMO validator, then
+  # runs the shared browser suite in Gecko. Chrome remains the visual authority.
+  firefox-runtime:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: Firefox Store smoke + Gecko suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Harden runner (audit egress and source writes)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.9"
+      - name: Read browser pins
+        id: browser-pins
+        shell: bash
+        run: |
+          firefox="$(tr -d '\r\n' < scripts/firefox/firefox-version.txt)"
+          geckodriver="$(tr -d '\r\n' < scripts/firefox/geckodriver-version.txt)"
+          [[ "$firefox" =~ ^[0-9]+(\.[0-9]+){1,3}$ ]] || { echo "invalid Firefox pin: $firefox" >&2; exit 1; }
+          [[ "$geckodriver" =~ ^[0-9]+(\.[0-9]+){1,3}$ ]] || { echo "invalid geckodriver pin: $geckodriver" >&2; exit 1; }
+          echo "firefox=$firefox" >> "$GITHUB_OUTPUT"
+          echo "geckodriver=$geckodriver" >> "$GITHUB_OUTPUT"
+      - uses: browser-actions/setup-firefox@0bc507ddf224827e3b1af68e014d5e42ab93e795 # v1.7.2
+        id: firefox
+        with:
+          firefox-version: ${{ steps.browser-pins.outputs.firefox }}
+      - uses: browser-actions/setup-geckodriver@fac5b0424c584257f32cf12c5eb4ba86014c34f8 # latest built branch, Node 24; no release tag
+        with:
+          geckodriver-version: ${{ steps.browser-pins.outputs.geckodriver }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check local TLS dependency
+        run: openssl version
+      - run: bun install --frozen-lockfile
+      - name: Run the packaged Store smoke and Gecko browser suite, badge its count
+        env:
+          FIREFOX_PATH: ${{ steps.firefox.outputs.firefox-path }}
+        run: bun run gen:badge:gecko
+      - name: In-browser Gecko badge in sync
+        # The Gecko lane is the one badge a contributor cannot regenerate without
+        # Firefox installed locally, so this step is where its count is pinned.
+        run: |
+          git diff --exit-code badges/inbrowser-gecko.json || {
+            echo '::error::badges/inbrowser-gecko.json is stale - run `FIREFOX_PATH=... bun run gen:badge:gecko` and commit it (the count this job just measured is in the log above).'
+            exit 1
+          }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: firefox-runtime-diagnostics
+          path: artifacts/firefox-runtime/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Additive job — the headless TWO-PEER dweb integration test (TESTING.md
+  # §B–F), previously a manual two-Chrome-profile checklist. Stands up the local
+  # signaling node and opens two real browser contexts that must form a WebRTC
+  # mesh and exchange gossip — the live peer-to-peer seam no other job covers.
+  twopeer:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: dweb two-peer (headless WebRTC)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden runner (audit egress and source writes)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.9"
+      - uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
+        id: chrome
+        with:
+          chrome-version: stable
+      - run: bun install --frozen-lockfile
+      - name: Run the two-peer harness over CDP
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        # Retry: the headless-WebRTC ICE/peer-connect handshake is intermittently
+        # flaky on CI runners. Up to 3 attempts; pass if any succeeds.
+        run: |
+          for attempt in 1 2 3; do
+            bun run test:twopeer && exit 0
+            echo "::warning::two-peer attempt $attempt failed (headless-WebRTC flake) — retrying"
+            sleep 5
+          done
+          exit 1
+      - name: Run the two-peer a2a ask/reply round-trip over CDP
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        # Same live mesh, plus the production a2a ask/reply correlation between the
+        # two peers (envelope + did-bound resolve over real WebRTC). Same flake
+        # retry as the gossip run above.
+        run: |
+          for attempt in 1 2 3; do
+            bun run test:twopeer:a2a && exit 0
+            echo "::warning::two-peer a2a attempt $attempt failed (headless-WebRTC flake) — retrying"
+            sleep 5
+          done
+          exit 1
+      - name: Run the two-peer STANDING conversation over CDP
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        # converse opens a thread, say continues it, the convId survives real
+        # WebRTC end to end. Same flake retry as the runs above.
+        run: |
+          for attempt in 1 2 3; do
+            bun run test:twopeer:conv && exit 0
+            echo "::warning::two-peer conv attempt $attempt failed (headless-WebRTC flake) — retrying"
+            sleep 5
+          done
+          exit 1
+
+  # Additive job — the multi-PROCESS dweb node test (PHASE1-TESTING §A.2),
+  # previously run only by hand. Spawns a relay + N real node processes that
+  # form an authenticated mesh and self-test gossip/direct/DHT/presence across
+  # process boundaries — the tier `bun test` (in-memory pipes) and the
+  # in-browser suite (no dweb live path) both miss. Pure Bun, no Chrome.
+  netproc:
+    name: dweb netproc (multi-process nodes)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden runner (audit egress and source writes)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.9"
+      - run: bun install --frozen-lockfile
+      # Retry: cross-process port/timing in the multi-node mesh can flake.
+      - name: Run the netproc harness (retry)
+        run: |
+          for attempt in 1 2 3; do
+            bun run test:netproc && exit 0
+            echo "::warning::netproc attempt $attempt failed — retrying"
+            sleep 5
+          done
+          exit 1
+
+  # Additive job — NOT in the required-checks list; lets it earn a green
+  # history before gating. First test that loads the REAL unpacked extension
+  # and drives the live side panel through one full agent turn.
+  e2e:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: e2e (side panel)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden runner (audit egress and source writes)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.9"
+      - run: bun install --frozen-lockfile --ignore-scripts
+      # why setup-chrome: it installs the system libraries headless Chrome
+      # needs. We then run against Chrome for Testing (branded Chrome ignores
+      # --load-extension), which reuses those libs.
+      - uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
+      - name: Generate dev manifest
+        run: bun run gen:dev
+      - name: Provision Chrome for Testing
+        id: cft
+        run: echo "chrome-path=$(bun scripts/cdp/ensure-chrome-for-testing.mjs | tail -1)" >> "$GITHUB_OUTPUT"
+      - name: Run side-panel E2E suite
+        env:
+          CHROME_PATH: ${{ steps.cft.outputs.chrome-path }}
+        # The verify runner (--functional) drives every functional state —
+        # smoke, goal mode, stop, error — against ONE Chrome (env-independent;
+        # visual states are excluded here as their baselines are per-machine).
+        # The generator wraps that same run and records its states + checks.
+        run: bun run gen:badge:e2e
+      - name: E2E badge in sync
+        run: |
+          git diff --exit-code badges/e2e-chrome.json || {
+            echo '::error::badges/e2e-chrome.json is stale - run `bun run gen:badge:e2e` and commit it.'
+            exit 1
+          }
+      - name: Run cold first-signup passkey regression
+        env:
+          CHROME_PATH: ${{ steps.cft.outputs.chrome-path }}
+        # A virtual CTAP2.1 authenticator exercises WebAuthn PRF through the
+        # real side panel and MV3 worker, including the post-credential commit.
+        run: bun run test:e2e:passkey
+      - name: Exercise the MV3 lifecycle fault boundary
+        env:
+          CHROME_PATH: ${{ steps.cft.outputs.chrome-path }}
+        run: bun run test:e2e:lifecycle
+      - name: Upload MV3 lifecycle diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: chrome-lifecycle-diagnostics
+          path: artifacts/chrome-lifecycle/
+
+  # The VISUAL lane: render the side panel, compare against the committed
+  # baselines, go red when the UI moved. NOT in required checks until it has a
+  # green history (same posture as `inbrowser` / `e2e`).
+  #
+  # why its OWN job rather than a step inside `e2e (side panel)`:
+  #   1. Opposite determinism contracts. The functional lane is deliberately
+  #      environment-independent and tracks whatever Chrome ships; this one
+  #      compares PIXELS, so it pins both the runner image and the Chrome build.
+  #      Folded together, a Chrome text-rasterization bump would red the
+  #      FUNCTIONAL gate — the one we actually want to require for merge.
+  #   2. Red means something different here ("the UI moved, go look") than in
+  #      the functional job ("something is broken"). Two rows keeps that legible.
+  #   3. Different outputs and permissions: this one uploads before/after/diff
+  #      PNGs and writes a PR comment; the functional job does neither.
+  visual:
+    name: "visual (render)"
+    # why serialize per ref: the publish step does `rm -rf pr<N>` before adding
+    # its own sha dir, so two runs on one PR race on the visual-diffs branch. An
+    # older run that loses the push and takes the rebase-retry re-applies that
+    # delete on top of the NEWER run's directory, leaving the newest comment
+    # pointing at 404ing images. Cancelling the superseded run is also what you
+    # want on its own terms: its montage is already stale.
+    concurrency:
+      group: visual-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    # A prepared Dependabot head can contain a candidate Action SHA. Never let
+    # that candidate share this job's repository-write token.
+    if: >-
+      (github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false) &&
+      !(github.event_name == 'pull_request' &&
+        github.event.pull_request.user.login == 'dependabot[bot]') &&
+      !(github.event_name == 'workflow_dispatch' &&
+        (inputs.security_read_only ||
+          startsWith(github.ref, 'refs/tags/security-validation-pr-')))
+    # PINNED, not ubuntu-latest: `latest` migrates between images, and a
+    # freetype/fontconfig bump would re-rasterize every glyph in every baseline.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write        # push before/after montages to the visual-diffs branch
+      pull-requests: write   # inline-image diff comment; same-repo PRs only
+    env:
+      # Names the render platform in the report. Both sides of the comparison are
+      # rendered HERE, in this job, so no cross-platform question arises.
+      VISUAL_PLATFORM: linux-x64
+      TZ: UTC
+    steps:
+      - name: Harden runner (audit egress and source writes)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      # fetch-depth 0: the comparison needs the MERGE BASE's tree, and a shallow
+      # clone cannot produce a worktree at a commit it never fetched.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.9"
+      # why setup-chrome: installs the system libraries headless Chrome needs.
+      # We then run the PINNED Chrome for Testing build against them.
+      - uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
+      - name: Read the pinned Chrome for Testing version
+        id: pin
+        run: echo "version=$(cat scripts/cdp/chrome-version.txt)" >> "$GITHUB_OUTPUT"
+      # why cache: the CfT zip is ~150 MB per run, and the key IS the pin, so a
+      # hit is always the exact build the baselines were seeded against.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/peerd-cft/${{ steps.pin.outputs.version }}
+          key: peerd-cft-${{ runner.os }}-${{ steps.pin.outputs.version }}
+      - name: Generate dev manifest
+        run: bun run gen:dev
+      - name: Provision Chrome for Testing (pinned)
+        id: cft
+        run: echo "chrome-path=$(bun scripts/cdp/ensure-chrome-for-testing.mjs | tail -1)" >> "$GITHUB_OUTPUT"
+      # This branch's render. It still GATES, but on the states' own functional
+      # checks and on a state throwing - never on pixels. Pixels are decided by
+      # the comparison below, which has something to compare against.
+      - name: Render every visual state on this branch
+        env:
+          CHROME_PATH: ${{ steps.cft.outputs.chrome-path }}
+        id: render
+        run: bun run test:e2e:visual
+
+      # The regression answer. Renders the SAME state definitions against the
+      # merge-base extension build and diffs the pairs - see the header of
+      # scripts/cdp/visual-vs-base.mjs for why nothing is stored in the repo.
+      #
+      # continue-on-error, deliberately: a computed reference cannot tell an
+      # intended redesign from a regression, so this REPORTS. The reviewer
+      # decides, from the before/after images in the PR comment below.
+      - name: Compare every screen against the merge base
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          CHROME_PATH: ${{ steps.cft.outputs.chrome-path }}
+        id: vsbase
+        run: |
+          git fetch --no-tags origin main || true
+          bun scripts/cdp/visual-vs-base.mjs --reuse-head || true
+
+      - name: Write the render report to the job summary
+        if: always()
+        run: |
+          report=scripts/cdp/visual-runs/visual-vs-base.md
+          {
+            echo "## visual — UI render (side panel + full tab, light + dark)"
+            echo
+            if [ -s "$report" ]; then
+              cat "$report"
+            else
+              echo "_Rendered this branch only (no merge base to compare against on this event)._"
+            fi
+            echo
+            echo "Every screen, both sides, plus the diff masks: the \`visual-screens\` artifact on this run."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The full evidence channel, and the only one that works on FORK PRs
+      # (upload-artifact authenticates with the Actions runtime token, not
+      # GITHUB_TOKEN). Both renders plus the diff masks, every screen, always -
+      # not just when something moved, so a reviewer of a quiet PR can still see
+      # what the lane actually covers.
+      - name: Upload every screen (both sides + diff masks)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: visual-screens-${{ github.event.pull_request.number && format('pr{0}', github.event.pull_request.number) || github.ref_name }}-run${{ github.run_number }}.${{ github.run_attempt }}
+          path: scripts/cdp/visual-runs/screens/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Same-repo PRs only: a fork PR's GITHUB_TOKEN is read-only, so pushing the
+      # montages + commenting would fail. The summary + artifact above carry the
+      # same information and DO work on forks. Keep this on `pull_request`, never
+      # `pull_request_target` (untrusted head, write token = unsafe).
+      #
+      # Publishes each CHANGED screen's before|after montage to the `visual-diffs`
+      # branch (orphan; images only, never merges to main) under pr<N>/<sha>/, then
+      # posts a PR comment that embeds them by raw URL - so before/after renders
+      # INLINE, no artifact download. Keyed by head sha so re-runs bust GitHub's
+      # image cache; the PR's old sha dir is replaced each run to bound growth,
+      # and the whole pr<N>/ dir is removed when the PR closes (see visual-prune).
+      #
+      # ALWAYS, not only when something changed: a reviewer of a quiet PR had no
+      # way to know the lane ran at all, so "nothing moved" has to be a stated
+      # result rather than an absence. STICKY by a hidden marker, so a branch
+      # pushed ten times leaves one comment, not ten.
+      - name: Publish before/after montages + inline PR comment
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          short="${HEAD_SHA:0:12}"
+          montage="scripts/cdp/visual-runs/montage"
+          report="scripts/cdp/visual-runs/visual-vs-base.json"
+          base=""
+
+          # Compose only the screens the comparison flagged. No flagged screen
+          # means no montage and no push - just the "nothing moved" comment.
+          if [ -f "$report" ] && bun scripts/cdp/visual-compare.mjs \
+               --before scripts/cdp/visual-runs/screens/base \
+               --after scripts/cdp/visual-runs/screens/head \
+               --report "$report" --out "$montage"; then
+            # Publish to the visual-diffs branch via an authenticated clone. why a
+            # separate clone: the main checkout is on the PR head; this branch is
+            # orphan and unrelated. Fall back to creating it if it does not exist.
+            auth="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+            pub="$RUNNER_TEMP/visual-diffs"
+            git clone --branch visual-diffs --single-branch --depth 1 "$auth" "$pub" 2>/dev/null || {
+              git clone --depth 1 "$auth" "$pub"
+              git -C "$pub" checkout --orphan visual-diffs
+              git -C "$pub" rm -rqf . || true
+              printf '# peerd visual diffs\n\nCI-published before/after montages for review. Orphan branch (never merges to main); images only under `pr<N>/<sha>/`, removed when the PR closes.\n' > "$pub/README.md"
+            }
+            rm -rf "$pub/pr${PR}"
+            mkdir -p "$pub/pr${PR}/$short"
+            cp "$montage"/*.before-after.png "$pub/pr${PR}/$short/"
+            git -C "$pub" add -A
+            git -C "$pub" -c user.name='github-actions[bot]' \
+              -c user.email='github-actions[bot]@users.noreply.github.com' \
+              commit -q -m "visual diffs: PR #${PR} @ $short"
+            # A racing run on another PR can advance the branch; rebase-retry once.
+            git -C "$pub" push origin visual-diffs || {
+              git -C "$pub" pull --rebase origin visual-diffs && git -C "$pub" push origin visual-diffs
+            }
+            base="https://raw.githubusercontent.com/${REPO}/visual-diffs/pr${PR}/$short"
+          fi
+
+          bun scripts/cdp/visual-review-comment.mjs \
+            --base-url "$base" --run-url "$RUN_URL" --montage-dir "$montage" > "$RUNNER_TEMP/visual-comment.md"
+          MARKER='<!-- peerd-visual -->'
+          # why `|| true`: --paginate keeps writing after `head -1` closes the
+          # pipe, so gh takes SIGPIPE (141); under `set -o pipefail` that would
+          # abort this step immediately BEFORE posting, and continue-on-error
+          # would mask it as "the review channel just stopped updating". head has
+          # already emitted the id by then, so the assignment still holds.
+          ID=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
+                 --jq "map(select(.body | startswith(\"$MARKER\"))) | .[0].id // empty" | head -1) || true
+          if [ -n "$ID" ]; then
+            gh api -X PATCH "repos/${REPO}/issues/comments/${ID}" -F body=@"$RUNNER_TEMP/visual-comment.md" >/dev/null
+            echo "updated sticky visual comment $ID"
+          else
+            gh api -X POST "repos/${REPO}/issues/${PR}/comments" -F body=@"$RUNNER_TEMP/visual-comment.md" >/dev/null
+            echo "posted visual comment"
+          fi
+
+  # The behavioral packaged-build gate. Its OWN job (stable name) on purpose:
+  # check:pages is the only tier that loads the REAL pruned artifact and so the
+  # only one that catches the v0.2.0 black-screen class — it must be able to gate
+  # merges WITHOUT being coupled to the flakier faked-wire e2e suite above. Add
+  # this job to the branch-protection required-checks list once it has a green
+  # history (mirrors the note on `inbrowser`).
+  packaged-pages:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: packaged page boot
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden runner (audit egress and source writes)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.9"
+      - uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
+      - run: bun install --frozen-lockfile
+      - name: Provision Chrome for Testing
+        id: cft
+        run: echo "chrome-path=$(bun scripts/cdp/ensure-chrome-for-testing.mjs | tail -1)" >> "$GITHUB_OUTPUT"
+      - name: Boot every packaged page (no blank page / missing same-origin resource)
+        env:
+          CHROME_PATH: ${{ steps.cft.outputs.chrome-path }}
+        # Packages both channels, loads the PRUNED tree, boots every shipped page,
+        # and fails on a blank page OR any failed same-origin resource load (CSS/
+        # font/wasm/dynamic-import 404) — the silent half of the black-screen class
+        # the e2e suite (unpacked source) structurally cannot see.
+        run: bun run check:pages
+
+  package:
+    name: package ${{ matrix.channel }}/${{ matrix.browser }}
+    runs-on: ubuntu-latest
+    needs: [test, checks]
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: [store, preview]
+        browser: [chrome, firefox]
+    steps:
+      - name: Harden runner (audit egress and source writes)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.9"
+      - run: bun install --frozen-lockfile
+      # --no-sign: matrix packages prove packageability + boundary on every
+      # push (store artifacts are verified inside package.ts); signing
+      # happens only in the release job, where the secrets live.
+      - run: bun packaging/package.ts --channel=${{ matrix.channel }} --browser=${{ matrix.browser }} --no-sign
+      # Reproducibility gate: package.ts normalizes mtimes/modes/entry order,
+      # so a second build of the same tree must be byte-identical. If this
+      # fails, a nondeterministic input crept into the staging pass — and the
+      # "rebuild the release from source and compare digests" verification
+      # story silently stops working.
+      - name: Rebuild and assert byte-identical artifact
+        run: |
+          set -euo pipefail
+          # nullglob: each matrix cell produces only .zip (chrome) OR .xpi
+          # (firefox) — without it the unmatched pattern reaches sha256sum
+          # as a literal and fails the step under pipefail.
+          shopt -s nullglob
+          artifacts=(artifacts/*.zip artifacts/*.xpi)
+          [ ${#artifacts[@]} -gt 0 ] || { echo '::error::no artifact produced to digest'; exit 1; }
+          sha256sum "${artifacts[@]}" | sort > first.sums
+          bun packaging/package.ts --channel=${{ matrix.channel }} --browser=${{ matrix.browser }} --no-sign --skip-verify
+          sha256sum "${artifacts[@]}" | sort > second.sums
+          diff first.sums second.sums || {
+            echo '::error::packaging is not reproducible — two builds of the same tree produced different bytes'
+            exit 1
+          }
+          cat first.sums
+      # why upload only off PRs: a PR build's job is to prove the package
+      # COMPILES and passes the dweb-trace verify — both run in package.ts above,
+      # BEFORE this step — and nobody downloads a PR's artifact. Uploading every
+      # PR's four packages burns the Actions artifact-storage quota; once that's
+      # hit the upload step itself errors and reds the whole matrix on changes
+      # that built + verified fine. Keep uploads for main + tags (the release/QA
+      # inputs); cap retention so they can't pile up indefinitely.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: github.event_name != 'pull_request'
+        with:
+          name: peerd-${{ matrix.channel }}-${{ matrix.browser }}
+          path: |
+            artifacts/*.zip
+            artifacts/*.xpi
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: GitHub Release (preview channel)
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') &&
+      (github.event_name != 'workflow_dispatch' ||
+        (inputs.security_release_sha != '' && inputs.security_release_sha == github.sha))
+    runs-on: ubuntu-latest
+    # Bound the same image-validation exposure on the trusted signing path.
+    timeout-minutes: 30
+    needs: [test, checks, firefox-runtime, package]
+    # The one job that holds signing secrets. Bound to a GitHub Environment so
+    # the secrets can be scoped to it AND protection rules (required reviewers,
+    # tag-pattern restrictions) can gate every run that touches the signing
+    # key — configure those under Settings → Environments → release. The
+    # environment is auto-created on first run; the protection rules are the
+    # part only a human can add.
+    environment: release
+    permissions:
+      contents: write
+      # For the signed build-provenance attestation on the release artifacts.
+      id-token: write
+      attestations: write
+    steps:
+      - name: Harden runner (audit egress and source writes)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.9"
+      - run: bun install --frozen-lockfile
+
+      - name: Check tag matches package.json version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(bun -e 'console.log(JSON.parse(require("fs").readFileSync("package.json","utf8")).version)')"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::tag v$TAG_VERSION does not match package.json version $PKG_VERSION"
+            exit 1
+          fi
+
+      # Required once the release environment's manual reviewer is removed for
+      # verified security auto-releases: a v* tag is not sufficient authority
+      # on its own. The exact tagged commit must already be reachable from the
+      # protected main branch before this job is allowed to read signing keys.
+      - name: Require the tagged commit to belong to protected main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo '::error::release tag does not point to a commit on origin/main'
+            exit 1
+          }
+
+      - name: Require signing credentials
+        env:
+          CRX_PRIVATE_KEY: ${{ secrets.CRX_PRIVATE_KEY }}
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          # Releases never ship unsigned preview packages (spec §15) — fail
+          # fast here rather than attaching artifacts that scare users.
+          [ -n "$CRX_PRIVATE_KEY" ] || { echo '::error::CRX_PRIVATE_KEY secret not set'; exit 1; }
+          [ -n "$AMO_JWT_ISSUER" ] || { echo '::error::AMO_JWT_ISSUER secret not set'; exit 1; }
+          [ -n "$AMO_JWT_SECRET" ] || { echo '::error::AMO_JWT_SECRET secret not set'; exit 1; }
+          printf '%s' "$CRX_PRIVATE_KEY" > key.pem
+
+      # ORDERING RULE for the rest of this job: the AMO upload is the ONE
+      # irreversible act in a release. `web-ext sign` posts the package to
+      # addons.mozilla.org and burns the version number there — a later failure
+      # cannot take it back, and re-running dies on "Version X already exists"
+      # until someone bumps. So every step that CAN fail runs BEFORE it.
+      #
+      # That is why packaging is split in two here rather than one `package:all`:
+      # everything local (both store zips, and the Chrome CRX, whose signing is an
+      # in-process crx3 call) is built, proved, and ATTESTED first. Attestation is
+      # exactly the kind of gate that belongs on this side of the line — it depends
+      # on org/repo settings and on minting an OIDC token, so it can fail for
+      # reasons that have nothing to do with the artifacts.
+      - name: Package the local artifacts (both store zips + Chrome CRX)
+        shell: bash
+        run: |
+          # why pipefail: without it `bun … | tee` reports tee's exit code, so a
+          # failed packaging run would sail through and the release could ship
+          # partially-packaged artifacts. (`shell: bash` also enables pipefail,
+          # but be explicit — this step is the release gate.)
+          set -euo pipefail
+          { bun packaging/package.ts --channel=store --browser=chrome
+            bun packaging/package.ts --channel=store --browser=firefox
+            bun packaging/package.ts --channel=preview --browser=chrome
+            bun run package:web
+          } 2>&1 | tee package.log
+          if grep -q 'UNSIGNED' package.log; then
+            echo '::error::the Chrome preview artifact was left unsigned — aborting release'
+            exit 1
+          fi
+
+      - name: Assert the Chrome preview CRX is actually signed
+        shell: bash
+        run: |
+          # Positive proof of signing, not just absence of the UNSIGNED marker (a
+          # packaging run that died before sign.ts ran prints no marker at all).
+          set -euo pipefail
+          CRX=artifacts/peerd-preview-chrome.crx
+          [ -f "$CRX" ] || { echo "::error::$CRX missing — CRX signing did not run"; exit 1; }
+          [ "$(head -c4 "$CRX")" = "Cr24" ] || { echo "::error::$CRX lacks the Cr24 CRX3 magic — not a signed CRX"; exit 1; }
+
+      # Signed SLSA-style provenance for everything that exists so far. Runs
+      # BEFORE the AMO upload on purpose (see the ordering rule above): if
+      # attestation is going to fail — settings not enabled, OIDC unavailable —
+      # it fails here, with nothing yet submitted to Mozilla.
+      # Verify with: gh attestation verify <file> --repo <owner>/<repo>
+      - name: Attest build provenance (local artifacts)
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            artifacts/peerd-preview-chrome.crx
+            artifacts/peerd-store-chrome.zip
+            artifacts/peerd-store-firefox.xpi
+
+      # ---- the irreversible step ----
+      - name: Package + AMO-sign the Firefox preview (irreversible)
+        shell: bash
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          set -euo pipefail
+          bun packaging/package.ts --channel=preview --browser=firefox 2>&1 | tee amo.log
+          if grep -q 'UNSIGNED' amo.log; then
+            echo '::error::the Firefox preview artifact was left unsigned — aborting release'
+            exit 1
+          fi
+
+      - name: Assert the Firefox preview XPI carries AMO's signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          XPI=artifacts/peerd-preview-firefox.xpi
+          [ -f "$XPI" ] || { echo "::error::$XPI missing — Firefox preview was not built"; exit 1; }
+          unzip -l "$XPI" META-INF/mozilla.rsa >/dev/null \
+            || { echo "::error::$XPI has no META-INF/mozilla.rsa — AMO signing did not run"; exit 1; }
+
+      # The XPI cannot be attested any earlier — it does not exist in its final
+      # form until AMO returns the signed file. This is the one attestation that
+      # unavoidably follows the irreversible step.
+      - name: Attest build provenance (AMO-signed XPI)
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: artifacts/peerd-preview-firefox.xpi
+
+      - name: Regenerate update feeds for this release
+        run: bun packaging/gen-update-feeds.ts --version="${GITHUB_REF_NAME#v}" --repo="$GITHUB_REPOSITORY"
+
+      # Digest manifest: lets anyone verify a downloaded artifact (or a
+      # store-submitted zip) against what this run actually built. Store zips are
+      # included because their upload is manual — the digest is how a human
+      # confirms the file they submit is the file CI verified.
+      #
+      # why the store lines get their OWN file: they are NOT release assets (store
+      # uploads are manual), so a user who downloads everything the release
+      # publishes and runs `sha256sum -c SHA256SUMS` would get two
+      # "FAILED open or read" lines and exit 1 on a perfectly authentic release —
+      # the canonical verification command reporting failure is how people learn to
+      # stop running it. SHA256SUMS covers exactly the published assets.
+      - name: Write SHA256SUMS for all release artifacts
+        run: |
+          set -euo pipefail
+          # Basename-relative lines so `sha256sum -c SHA256SUMS` verifies
+          # files downloaded from the release page directly.
+          (cd artifacts && sha256sum peerd-preview-chrome.crx peerd-preview-firefox.xpi > SHA256SUMS)
+          (cd artifacts && sha256sum chrome-preview.xml firefox-preview.json) >> artifacts/SHA256SUMS
+          (cd artifacts && sha256sum peerd-store-chrome.zip peerd-store-firefox.xpi > SHA256SUMS.store)
+          echo '--- SHA256SUMS (release assets; verify with `sha256sum -c SHA256SUMS`) ---'
+          cat artifacts/SHA256SUMS
+          echo '--- SHA256SUMS.store (manually submitted store packages) ---'
+          cat artifacts/SHA256SUMS.store
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Idempotent: when Actions billing is down, releases are cut from
+          # a dev machine (bun run release) which also creates this release.
+          # If CI later runs the same tag, view-or-create + upload --clobber
+          # makes the second run a harmless no-op instead of a duplicate
+          # "release already exists" failure.
+          ASSETS=(
+            artifacts/peerd-preview-chrome.crx
+            artifacts/peerd-preview-firefox.xpi
+            artifacts/SHA256SUMS
+            artifacts/SHA256SUMS.store
+            artifacts/chrome-preview.xml
+            artifacts/firefox-preview.json
+          )
+          # Notes come from the tag's CHANGELOG.md section (same helper the
+          # local release path uses). A missing section fails the job here,
+          # so a release is never published with boilerplate notes.
+          bun packaging/release-notes.ts --version="${GITHUB_REF_NAME#v}" > "$RUNNER_TEMP/release-notes.md"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME exists — re-uploading assets"
+            gh release upload "$GITHUB_REF_NAME" --clobber "${ASSETS[@]}"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "peerd-preview-$GITHUB_REF_NAME" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
+              "${ASSETS[@]}"
+          fi
+
+  notify-site:
+    name: Notify peerd-site release hook
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # why a separate unprotected environment: GitHub requests approval per job,
+    # even when two jobs use the same protected environment. This keeps the
+    # cross-repository credential scoped to its only consumer while one human
+    # approval authorizes the release chain once. Keeping notification in its
+    # own job means "re-run failed jobs" retries only this safe dispatch instead
+    # of attempting to publish the irreversible Firefox version again.
+    environment: release-notify
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner (audit egress)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Dispatch the exact released tag to peerd-site
+        env:
+          GH_TOKEN: ${{ secrets.PEERD_SITE_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::PEERD_SITE_DISPATCH_TOKEN is not set in the release-notify environment. Add a fine-grained token scoped to NotASithLord/peerd-site with Contents:write, then re-run this failed job."
+            exit 1
+          fi
+          # why retry here: this is the only cross-repository handoff. Brief
+          # GitHub API failures should not require a human re-run, while the
+          # bounded loop still leaves a visible failure for the hourly repair
+          # workflow in peerd-site to reconcile after a longer outage.
+          dispatched=false
+          for attempt in 1 2 3; do
+            if gh api --method POST repos/NotASithLord/peerd-site/dispatches \
+              -f event_type=peerd-release \
+              -F "client_payload[tag]=$GITHUB_REF_NAME"; then
+              dispatched=true
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              delay=$((attempt * 10))
+              echo "::warning::peerd-site dispatch attempt $attempt failed; retrying in ${delay}s"
+              sleep "$delay"
+            fi
+          done
+          if [ "$dispatched" != true ]; then
+            echo "::error::peerd-site dispatch failed after 3 attempts; the hourly site reconciliation remains the repair path"
+            exit 1
+          fi
+          echo "dispatched peerd release $GITHUB_REF_NAME to peerd-site"

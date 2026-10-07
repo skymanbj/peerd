@@ -1,0 +1,40 @@
+# Routine dependency updates get 30 days of release seasoning. GitHub applies
+# `cooldown` only to version updates, so Dependabot security PRs remain eligible
+# immediately. The no-human merge workflow separately requires a continuous
+# 72-hour clean observation window for patch-only Bun lockfile replacements,
+# and 30 days for Actions patch fixes.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 30
+    groups:
+      # The name is part of the fail-closed auto-merge contract in
+      # dependabot-security-release.yml. Only Dependabot security updates can
+      # enter this group; routine updates remain in the seasoned group below.
+      actions-security-patches:
+        applies-to: security-updates
+        patterns: ['*']
+      actions:
+        applies-to: version-updates
+        patterns: ['*']
+
+  # Updates package.json and the committed text-based bun.lock together. This
+  # includes exact-pinned signing dependencies; they still move only through a
+  # reviewed PR and must pass the frozen-lockfile and security CI gates.
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 30
+    groups:
+      bun-security-patches:
+        applies-to: security-updates
+        patterns: ['*']
+      bun-dependencies:
+        applies-to: version-updates
+        patterns: ['*']

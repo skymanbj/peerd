@@ -1,0 +1,229 @@
+import { describe, test, expect } from 'bun:test';
+import { makeVaultRoutes } from '../../extension/background/routes/vault.js';
+
+// The vault routes moved out of the service worker verbatim. These pin the
+// part with real branching — the typed-error → stable-error-code mapping — and
+// confirm the deps wiring (audit append, pushState, ensureOffscreen, the
+// base-network kick) fires where it should. Behavior must match the inline
+// originals exactly.
+
+// Stand-in typed errors (the real ones live in peerd-egress; routes only need
+// `instanceof` to work).
+class VaultAlreadyInitializedError extends Error {}
+class WrongPassphraseError extends Error {}
+class VaultNotInitializedError extends Error {}
+class RecoveryPassphraseNotSetError extends Error {}
+class PrfNotEnrolledError extends Error {}
+class PrfUnlockFailedError extends Error {}
+class VaultLockedError extends Error {}
+
+const makeDeps = (vaultOver: Record<string, any> = {}) => {
+  const calls: Record<string, any[]> = { audit: [], pushState: [], ensureOffscreen: [], maybeStart: [] };
+  const vault = {
+    initialize: async () => {},
+    unlock: async () => {},
+    lock: () => {},
+    initializeWithPrfOnly: async () => {},
+    setRecoveryPassphrase: async () => {},
+    prfStatus: async () => ({ enrolled: false }),
+    enrollPrf: async () => {},
+    unlockWithPrf: async () => {},
+    disablePrf: async () => {},
+    ...vaultOver,
+  };
+  const deps = {
+    vault,
+    auditLog: { append: async (e: any) => { calls.audit.push(e); } },
+    kv: {}, idb: {},
+    base64ToBytes: (s: string) => new Uint8Array([s.length]),
+    ensureOffscreen: async () => { calls.ensureOffscreen.push(1); },
+    maybeStartBaseNetwork: (r: string) => { calls.maybeStart.push(r); },
+    pushState: () => { calls.pushState.push(1); },
+    purgeVaultBlob: async () => {},
+    sessionCache: { sessionGet: async () => 'chat-a' },
+    maybeAutoResumeAfterRecovery: () => {},
+    isActualSidepanelSender: (sender: any) => sender?.surface === 'sidepanel',
+    isActualHomeSender: (sender: any) => sender?.surface === 'home',
+    confirmCoordinator: {
+      resolve: (claim: Record<string, unknown>, answer: string, via: string) => {
+        calls.resolve = [claim, answer, via];
+        return claim.ownerSessionId === 'chat-a'
+          && claim.sessionId === 'actor-a'
+          && claim.dispatchId === 'tu-a';
+      },
+    },
+    VaultAlreadyInitializedError, WrongPassphraseError, VaultNotInitializedError,
+    RecoveryPassphraseNotSetError, PrfNotEnrolledError, PrfUnlockFailedError, VaultLockedError,
+  };
+  return { deps, calls, vault };
+};
+
+const routes = (over?: Record<string, any>) => {
+  const { deps, calls, vault } = makeDeps(over);
+  return { r: makeVaultRoutes(deps), calls, vault };
+};
+
+describe('vault routes — success paths', () => {
+  test('initialize: audits + ensures offscreen', async () => {
+    const { r, calls } = routes();
+    expect(await r['vault/initialize']({ passphrase: 'pw' })).toEqual({ ok: true });
+    await Promise.resolve();
+    expect(calls.audit[0]).toEqual({ type: 'vault_initialized' });
+    expect(calls.ensureOffscreen.length).toBe(1);
+  });
+
+  test('unlock: audits, ensures offscreen, kicks base network with reason', async () => {
+    const { r, calls } = routes();
+    expect(await r['vault/unlock']({ passphrase: 'pw' })).toEqual({ ok: true });
+    expect(calls.maybeStart).toEqual(['unlock']);
+    expect(calls.ensureOffscreen.length).toBe(1);
+  });
+
+  test('lock: pushes state so the panel flips to the gate immediately', async () => {
+    const { r, calls } = routes();
+    expect(await r['vault/lock']()).toEqual({ ok: true });
+    expect(calls.pushState.length).toBe(1);
+  });
+
+  test('unlockPrf: kicks base network with unlock-prf reason', async () => {
+    const { r, calls } = routes();
+    expect(await r['vault/unlockPrf']({ prfOutput: 'AAAA' })).toEqual({ ok: true });
+    expect(calls.maybeStart).toEqual(['unlock-prf']);
+  });
+
+  test('prfStatus: spreads vault status into the reply', async () => {
+    const { r } = routes({ prfStatus: async () => ({ enrolled: true, credentialId: 'c' }) });
+    expect(await r['vault/prfStatus']()).toEqual({ ok: true, enrolled: true, credentialId: 'c' });
+  });
+
+  test('confirm/answer: relays to the coordinator', async () => {
+    const { r, calls } = routes();
+    const message = {
+      id: 'x', answer: 'yes_once', ownerSessionId: 'chat-a',
+      sessionId: 'actor-a', dispatchId: 'tu-a',
+    };
+    expect(await r['confirm/answer'](message, { surface: 'sidepanel' })).toEqual({ ok: true });
+    expect(calls.resolve).toEqual([{
+      id: 'x', ownerSessionId: 'chat-a', sessionId: 'actor-a', dispatchId: 'tu-a',
+    }, 'yes_once', 'sidepanel']);
+  });
+
+  test('confirm/answer: derives the answering surface from sender provenance', async () => {
+    const { r, calls } = routes();
+    const message = {
+      id: 'x', answer: 'yes_once', ownerSessionId: 'chat-a',
+      sessionId: 'actor-a', dispatchId: 'tu-a', surface: 'home',
+    };
+    expect(await r['confirm/answer'](message, { surface: 'sidepanel' })).toEqual({ ok: true });
+    expect(calls.resolve).toEqual([{
+      id: 'x', ownerSessionId: 'chat-a', sessionId: 'actor-a', dispatchId: 'tu-a',
+    }, 'yes_once', 'sidepanel']);
+  });
+
+  test('confirm/answer: a foreign chat UUID or non-human surface cannot grant authority', async () => {
+    const { r, calls } = routes();
+    const base = {
+      id: 'leaked', answer: 'yes_once', sessionId: 'actor-a', dispatchId: 'tu-a',
+    };
+    expect(await r['confirm/answer'](
+      { ...base, ownerSessionId: 'chat-a' }, { surface: 'engine' },
+    )).toEqual({ ok: false, error: 'confirm-answer-unauthorized-sender' });
+    expect(await r['confirm/answer'](
+      { ...base, ownerSessionId: 'chat-b' }, { surface: 'home' },
+    )).toEqual({ ok: false, error: 'confirm-answer-foreign-owner' });
+    expect(calls.resolve).toBeUndefined();
+  });
+});
+
+describe('vault routes — typed error → code mapping', () => {
+  test('initialize already-initialized', async () => {
+    const { r } = routes({ initialize: async () => { throw new VaultAlreadyInitializedError(); } });
+    expect(await r['vault/initialize']({ passphrase: 'p' })).toEqual({ ok: false, error: 'already-initialized' });
+  });
+  test('unlock maps each typed error', async () => {
+    expect(await routes({ unlock: async () => { throw new WrongPassphraseError(); } }).r['vault/unlock']({ passphrase: 'p' }))
+      .toEqual({ ok: false, error: 'wrong-passphrase' });
+    expect(await routes({ unlock: async () => { throw new VaultNotInitializedError(); } }).r['vault/unlock']({ passphrase: 'p' }))
+      .toEqual({ ok: false, error: 'not-initialized' });
+    expect(await routes({ unlock: async () => { throw new RecoveryPassphraseNotSetError(); } }).r['vault/unlock']({ passphrase: 'p' }))
+      .toEqual({ ok: false, error: 'recovery-not-set' });
+  });
+  test('unlock rethrows unknown errors (not swallowed to a code)', async () => {
+    const { r } = routes({ unlock: async () => { throw new Error('boom'); } });
+    await expect(r['vault/unlock']({ passphrase: 'p' })).rejects.toThrow('boom');
+  });
+  test('unlockPrf maps prf-specific errors', async () => {
+    expect(await routes({ unlockWithPrf: async () => { throw new PrfNotEnrolledError(); } }).r['vault/unlockPrf']({ prfOutput: 'A' }))
+      .toEqual({ ok: false, error: 'prf-not-enrolled' });
+    expect(await routes({ unlockWithPrf: async () => { throw new PrfUnlockFailedError(); } }).r['vault/unlockPrf']({ prfOutput: 'A' }))
+      .toEqual({ ok: false, error: 'prf-unlock-failed' });
+  });
+  test('disablePrf requires a recovery passphrase', async () => {
+    const { r } = routes({ disablePrf: async () => { throw new RecoveryPassphraseNotSetError(); } });
+    expect(await r['vault/disablePrf']()).toEqual({ ok: false, error: 'recovery-not-set' });
+  });
+});
+
+describe('vault routes — payload validation', () => {
+  test('initializeWithPasskey rejects a non-string payload', async () => {
+    const { r } = routes();
+    expect(await r['vault/initializeWithPasskey']({ credentialId: 1, prfSalt: 's', prfOutput: 'o' }))
+      .toEqual({ ok: false, error: 'invalid-prf-payload' });
+  });
+  test('initializeWithPasskey rolls back (lock + purge) on a non-typed failure', async () => {
+    let locked = false; let purged = false;
+    const { deps } = makeDeps({
+      initializeWithPrfOnly: async () => { throw new Error('hardware'); },
+      lock: () => { locked = true; },
+    });
+    deps.purgeVaultBlob = async () => { purged = true; };
+    const r = makeVaultRoutes(deps);
+    await expect(r['vault/initializeWithPasskey']({ credentialId: 'a', prfSalt: 'b', prfOutput: 'c' })).rejects.toThrow('hardware');
+    expect(locked).toBe(true);
+    expect(purged).toBe(true);
+  });
+  test('setRecoveryPassphrase rejects short passphrase', async () => {
+    const { r } = routes();
+    expect(await r['vault/setRecoveryPassphrase']({ passphrase: 'short' })).toEqual({ ok: false, error: 'invalid-passphrase' });
+  });
+});
+
+// #60: on an interactive unlock, goal runs must resume BEFORE auto-resume —
+// resume() re-adds a paused run to the runner's map (goalActiveFor → true)
+// before maybeAutoResume checks its guard, so the guard bails for a goal-owned
+// session instead of re-driving its interrupted turn and spuriously halting it.
+// A late-resolving resumeGoalRuns distinguishes the fix (auto-resume waits for
+// resume to settle) from the old inverted order (auto-resume fired first).
+describe('vault unlock — goal resume ordering (#60)', () => {
+  const orderingDeps = (order: string[]) => ({
+    vault: { unlock: async () => {}, unlockWithPrf: async () => {} },
+    auditLog: { append: async () => {} },
+    ensureOffscreen: async () => {},
+    maybeStartBaseNetwork: () => {},
+    base64ToBytes: () => new Uint8Array([1]),
+    sessionCache: { sessionGet: async () => 'cur' },
+    resumeGoalRuns: async () => { await new Promise((r) => setTimeout(r, 30)); order.push('resume'); },
+    maybeAutoResumeAfterRecovery: () => { order.push('autoresume'); },
+    WrongPassphraseError, VaultNotInitializedError, RecoveryPassphraseNotSetError,
+    PrfNotEnrolledError, PrfUnlockFailedError, VaultLockedError,
+  });
+  const settle = async (order: string[]) => {
+    for (let i = 0; i < 60 && order.length < 2; i++) await new Promise((res) => setTimeout(res, 5));
+  };
+
+  test('vault/unlock awaits goal resume BEFORE auto-resume (passphrase)', async () => {
+    const order: string[] = [];
+    const r = makeVaultRoutes(orderingDeps(order) as any);
+    expect(await r['vault/unlock']({ passphrase: 'pw' })).toEqual({ ok: true });
+    await settle(order);
+    expect(order).toEqual(['resume', 'autoresume']);
+  });
+
+  test('vault/unlockPrf awaits goal resume BEFORE auto-resume (Touch ID / PRF)', async () => {
+    const order: string[] = [];
+    const r = makeVaultRoutes(orderingDeps(order) as any);
+    expect(await r['vault/unlockPrf']({ prfOutput: 'AAAA' })).toEqual({ ok: true });
+    await settle(order);
+    expect(order).toEqual(['resume', 'autoresume']);
+  });
+});

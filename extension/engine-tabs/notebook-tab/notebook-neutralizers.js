@@ -1,0 +1,283 @@
+// @ts-check
+// notebook-neutralizers.js — the REALM SEAL for the Notebook worker.
+//
+// The js_notebook worker runs agent-authored code. This module makes the
+// audited postMessage fetch bridge (peerd.egress.fetch / global fetch) the ONLY
+// network egress reachable from that realm:
+//
+//   1. `fetch` itself IS the bridge. The native fetch is deleted from the
+//      whole prototype chain (worker globals inherit it from
+//      WorkerGlobalScope.prototype, so an own-property shim alone leaves
+//      the native recoverable via Object.getPrototypeOf), and the bridge
+//      is pinned as a non-configurable, non-writable own property.
+//   2. Every other network-capable primitive is hard-blocked the same
+//      way: XMLHttpRequest, WebSocket, WebSocketStream, EventSource,
+//      WebTransport, navigator.sendBeacon, importScripts (a classic-
+//      worker loader, dead in module workers, sealed anyway), and the
+//      nested Worker / SharedWorker constructors — a nested worker is a
+//      FRESH realm with un-sealed natives, so it must not exist at all.
+//   3. The seal is the worker graph's first edge. Chrome evaluates that import
+//      first. Firefox's single-entry linker emits the seal body first. Both
+//      execute it before any agent module body, closing the old pre-seal gap.
+//
+// What this still is NOT: the outermost fence. The host page's CSP
+// (notebook-tab/index.html, connect-src 'none') backstops the seal in the
+// Notebook TAB — inherited by the blob worker, so even a fresh realm there
+// can't leave. But the SAME sealed worker also runs HEADLESS in the offscreen
+// document (offscreen/job-runner.js, for script), whose CSP must allow https:
+// (the voice model downloads there) — so in that host the realm seal is the
+// ONLY fence. Every network-capable primitive must therefore be sealed by the
+// realm itself, not deferred to the page CSP.
+// Module loads are NOT an open channel. Store and web builds refuse remote
+// URL imports without requesting the module source. Preview's HOST resolver
+// fetches permitted module source through the audited data relay. The worker
+// receives only host-resolved code, never a third-party network URL.
+// import() itself is syntax, not a global, so there is nothing to seal here.
+//
+// One implementation, three callers: realm-seal.js (the worker graph's
+// first edge, linked into Firefox's single script), the bun unit tests (mock
+// globals), and the in-browser tests (real worker realms). All import
+// applyRealmSeal from here, so production and tests cannot drift.
+/**
+ * @param {any} global the worker (or mock) global scope to seal. why any: this
+ *   reaches into arbitrary realm globals (fetch, Worker, navigator, …) and
+ *   deletes/redefines them — the operation is type-erased by design.
+ * @param {{ environment?: string, exposeGlobalFetch?: boolean, blockHostStorage?: boolean, blockExtensionApis?: boolean }} [options]
+ * @returns {{ fetch: (input:any, init?:any)=>Promise<any> }} the audited fetch
+ *   capability, allowing stricter hosts such as Pod to expose it only through
+ *   a named interface while keeping global fetch blocked.
+ */
+export function applyRealmSeal(global, options = {}) {
+  const environment = options.environment ?? 'Notebook';
+  // why a named subclass: convention (CLAUDE.md) — and it lets notebook
+  // code (and our tests) distinguish "the notebook blocked this" from a
+  // genuine platform error.
+  class NotebookEgressBlockedError extends Error {
+    /** @param {string} channel */
+    constructor(channel) {
+      super(environment === 'Notebook'
+        ? `${channel} is disabled in peerd Notebook. Use peerd.egress.fetch(url) for audited network access.`
+        : `${channel} is disabled in peerd ${environment}. Use that environment's audited fetch interface.`);
+      this.name = `${environment.replace(/[^a-z0-9]/gi, '') || 'Worker'}EgressBlockedError`;
+      /** @type {string} */
+      this.channel = channel;
+    }
+  }
+  /** @param {string} channel @returns {never} */
+  const fail = (channel) => { throw new NotebookEgressBlockedError(channel); };
+
+  // Remove every reachable copy of `name` (own + whole prototype chain),
+  // then pin `value` as a non-configurable, non-writable own property.
+  // why delete-then-define: defineProperty alone only SHADOWS a prototype
+  // method — `WorkerGlobalScope.prototype.fetch.call(self, url)` would
+  // still reach the native. Deleting the (configurable) prototype slot
+  // makes the native unreachable for good: no fresh copy exists in this
+  // realm, and fresh realms are sealed off (Worker/importScripts below).
+  /** @param {any} target @param {string} name @param {any} value */
+  const seal = (target, name, value) => {
+    for (let o = target; o; o = Object.getPrototypeOf(o)) {
+      const desc = Object.getOwnPropertyDescriptor(o, name);
+      if (desc && desc.configurable) {
+        try { delete o[name]; } catch { /* strict-mode delete can throw; keep walking */ }
+      }
+    }
+    try {
+      Object.defineProperty(target, name, {
+        value, writable: false, configurable: false, enumerable: false,
+      });
+    } catch {
+      // Last resort (hostile pre-state, e.g. an existing non-configurable
+      // accessor): plain assignment. The CSP backstop covers this path.
+      try { target[name] = value; } catch { /* nothing left to do */ }
+    }
+  };
+
+  // --- the ONLY sanctioned egress: fetch bridged over postMessage -------
+  // The host page relays fetch-request → SW webFetch (SSRF block +
+  // denylist + audit) and posts fetch-response back. Closure state is
+  // unreachable from notebook code; notebook code posting its own
+  // fetch-request messages is equivalent to calling peerd.egress.fetch — same
+  // audited path, so that is not a bypass.
+  /** @type {Map<number, { resolve: (v: any) => void, reject: (e: any) => void, timer: ReturnType<typeof setTimeout> }>} */
+  const pending = new Map();
+  let nextRid = 1;
+  /** @param {any} input @param {any} [init] why any: stands in for the fetch Request/init shapes the bridge accepts (string url, {url}, RequestInit-ish). */
+  const bridgedFetch = (input, init) => {
+    const url = typeof input === 'string' ? input : input && input.url;
+    if (!url) return Promise.reject(new TypeError('fetch: url required'));
+    // why method/headers/body now ride the bridge: full HTTP from inside a
+    // Notebook script ("code mode") at parity with the fetch_url tool — same
+    // host-side webFetch (SSRF block + denylist + audit) governs every method,
+    // so a POST here is the SAME egress surface, not a new one. Body must be a
+    // string (JSON/text); a stream/Blob can't cross postMessage, which keeps the
+    // bridge small. Headers normalize to a plain object.
+    const opts = init || (typeof input === 'object' && input) || {};
+    const method = typeof opts.method === 'string' ? opts.method.toUpperCase() : 'GET';
+    /** @type {Record<string, string> | undefined} */
+    let headers;
+    if (opts.headers) {
+      /** @type {Record<string, string>} */
+      const h = {};
+      if (typeof opts.headers.forEach === 'function') {
+        opts.headers.forEach((/** @type {string} */ v, /** @type {string} */ k) => { h[k] = v; });
+      } else for (const k of Object.keys(opts.headers)) h[k] = opts.headers[k];
+      headers = h;
+    }
+    const body = opts.body == null ? undefined
+      : typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body);
+    // Design 2a extract step — why + security posture: shared/fetch-extract.js.
+    // Only the one shipped mode crosses the bridge; anything else stays inert
+    // (today's raw behavior, byte-for-byte).
+    const extract = opts.extract === 'markdown' ? 'markdown' : undefined;
+    return new Promise((resolve, reject) => {
+      const rid = nextRid++;
+      // why a timeout: a dropped host relay must not strand the eval —
+      // the worker has no other way to observe the host going away.
+      const timer = setTimeout(() => {
+        if (pending.has(rid)) {
+          pending.delete(rid);
+          reject(new Error(`fetch ${url} timed out`));
+        }
+      }, 30000);
+      pending.set(rid, { resolve, reject, timer });
+      global.postMessage({ type: 'fetch-request', rid, url, method, headers, body, ...(extract ? { extract } : {}) });
+    });
+  };
+  global.addEventListener('message', (/** @type {MessageEvent} */ ev) => {
+    const m = ev && ev.data;
+    if (!m || typeof m !== 'object' || m.type !== 'fetch-response') return;
+    const p = pending.get(m.rid);
+    if (!p) return;
+    pending.delete(m.rid);
+    clearTimeout(p.timer);
+    if (!m.ok && m.error) { p.reject(new Error(`fetch failed: ${m.error}`)); return; }
+    const bytes = m.bodyB64
+      ? Uint8Array.from(atob(m.bodyB64), (c) => c.charCodeAt(0))
+      : new Uint8Array();
+    const headers = m.headers || {};
+    // Design 2a markers: contentType reports what the bytes ARE ('text/markdown'
+    // after extraction, the wire type otherwise); extracted says whether the
+    // host's extraction actually ran, so code fanning out over mixed URLs can tell.
+    let contentType = null;
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() === 'content-type') { contentType = headers[key]; break; }
+    }
+    p.resolve({
+      ok: m.ok,
+      status: m.status,
+      statusText: m.statusText || '',
+      headers,
+      contentType,
+      extracted: m.extracted === true,
+      text: async () => new TextDecoder().decode(bytes),
+      json: async () => JSON.parse(new TextDecoder().decode(bytes)),
+      arrayBuffer: async () => bytes.buffer,
+      // why a method: the platform's Response.bytes() is a function returning
+      // Promise<Uint8Array>, and that's the shape a model reaches for. As a
+      // data property it LISTS in Object.keys but `resp.bytes()` throws
+      // "not a function" — observed burning several live agent turns.
+      bytes: async () => bytes,
+    });
+  });
+  if (options.exposeGlobalFetch === false) {
+    seal(global, 'fetch', function () { fail('fetch'); });
+  } else seal(global, 'fetch', bridgedFetch);
+
+  // --- hard-block every other network-capable primitive -----------------
+  // why function expressions (not arrows): `new <arrow>` throws a generic
+  // TypeError before the body runs; a function body runs under `new` and
+  // throws OUR error, so both call and construct yield the actionable
+  // message.
+  for (const name of [
+    'XMLHttpRequest',
+    'WebSocket',
+    'WebSocketStream',
+    'EventSource',
+    'WebTransport',
+    'Worker',        // a nested worker would be a fresh, un-sealed realm
+    'SharedWorker',  // not exposed in workers today; sealed for symmetry
+  ]) {
+    // why function, not arrow: these stand in for constructors (Worker,
+    // SharedWorker, …). An arrow has no [[Construct]], so `new Worker()`
+    // would throw "not a constructor" instead of OUR actionable error
+    // (see the call-and-construct note above). prefer-arrow-callback is
+    // off for this file in eslint.config.js for exactly this reason.
+    seal(global, name, function () { fail(name); });
+  }
+  // importScripts already throws in module workers, but it lives on
+  // WorkerGlobalScope.prototype — seal it so a future classic-worker
+  // context (or a spec change) cannot resurrect a loader-shaped fetch.
+  seal(global, 'importScripts', function () { fail('importScripts'); });
+  if (global.navigator) {
+    seal(global.navigator, 'sendBeacon', function () { fail('navigator.sendBeacon'); });
+    if (options.blockHostStorage === true) {
+      // Pod files are instance-rooted capabilities held by the trusted tab.
+      // navigator.storage.getDirectory() would instead hand this untrusted
+      // realm the extension origin's OPFS ROOT: every Notebook/Pod/App.
+      const storageBlocked = () => fail('StorageManager (navigator.storage)');
+      seal(global.navigator, 'storage', /** @type {any} */ ({
+        getDirectory: storageBlocked, estimate: storageBlocked,
+        persist: storageBlocked, persisted: storageBlocked,
+      }));
+    }
+  }
+
+  if (options.blockExtensionApis === true) {
+    // Dedicated extension Workers do not consistently expose these namespaces
+    // across browsers/versions. Pin them absent anyway: a future platform
+    // widening must not silently turn Pod code into a runtime.sendMessage or
+    // storage.local client.
+    seal(global, 'chrome', undefined);
+    seal(global, 'browser', undefined);
+  }
+
+  // The Cache API: cache.add()/addAll() run the Fetch algorithm — a REAL network
+  // GET that escapes the audited bridge. The Notebook tab's connect-src 'none'
+  // would fence it, but the offscreen script host that runs this SAME worker
+  // allows https:, so the realm must block it directly. Replace the whole
+  // CacheStorage with throwing stubs (open/match/has/delete/keys); the sandbox's
+  // sanctioned storage is OPFS. seal() deletes the prototype getter the same way
+  // it does for fetch, so the native CacheStorage is unreachable.
+  const cacheBlocked = () => fail('Cache API (caches)');
+  seal(global, 'caches', /** @type {any} */ ({
+    open: cacheBlocked, match: cacheBlocked, has: cacheBlocked,
+    delete: cacheBlocked, keys: cacheBlocked,
+  }));
+
+  // IndexedDB: a DURABLE, same-origin edge — NOT network, so it slips the
+  // "every egress channel is sealed" framing above, yet it is the single most
+  // dangerous one. The sealed worker is minted from a blob: URL inside an
+  // ORDINARY extension page (the Notebook tab / the offscreen host — only
+  // engine-tabs/app-tab/runner.html is in manifest `sandbox.pages`), so it
+  // inherits the extension origin chrome-extension://<id>. That is the SAME
+  // origin whose one IDB database `peerd` (peerd-egress/storage/idb.js) holds
+  // the vault blob, agents_memory (durable, always-loaded into the trusted
+  // orchestrator prompt), every session + session_messages, tool_grants, and
+  // the audit log — none of it partitioned from a same-origin worker. Without
+  // this seal, model-authored code the keyless web actor runs here (page-code
+  // REPL) or a Notebook run could POISON agents_memory('user') — a persistent,
+  // highest-authority prompt injection that re-enters the orchestrator across
+  // the B1 memory boundary the whole design rests on — FORGE a tool_grants
+  // record to pre-approve a side-effecting tool, or read the vault blob and
+  // full history out for exfil (the js_notebook lane ships egress). The
+  // sandbox's sanctioned durable store is OPFS, rooted per-instance by the
+  // host; IDB is never a sanctioned edge, so replace the whole IDBFactory with
+  // throwing stubs (open/deleteDatabase/databases/cmp), same shape as caches.
+  const idbBlocked = () => fail('IndexedDB (indexedDB)');
+  seal(global, 'indexedDB', /** @type {any} */ ({
+    open: idbBlocked, deleteDatabase: idbBlocked, databases: idbBlocked, cmp: idbBlocked,
+  }));
+  return Object.freeze({ fetch: bridgedFetch });
+}
+
+/**
+ * Production Notebook profile: audited fetch remains available, but the worker
+ * receives neither the extension-origin OPFS root nor ambient extension APIs.
+ * Keeping the profile here makes the production entry and adversarial tests use
+ * the same invocation instead of duplicating security-significant options.
+ * @param {any} global
+ */
+export const applyNotebookRealmSeal = (global) => applyRealmSeal(global, {
+  blockHostStorage: true,
+  blockExtensionApis: true,
+});

@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!--
+    Sandboxed page (declared in manifest.json sandbox.pages). MV3
+    strips ALL chrome.* APIs from sandboxed pages, but we get:
+      - opaque origin
+      - peerd's narrowed sandbox CSP, which allows inline <script>
+      - postMessage with the parent window
+
+    This page lives inside an iframe in app-tab/index.html. Its only
+    job is to wait for the parent to postMessage the agent's HTML body
+    and then document.write it -- replacing this page entirely with
+    the agent's content. Inline <script> tags in the body execute
+    because the sandbox CSP permits them.
+  -->
+</head>
+<body>
+<script>
+  (() => {
+    'use strict';
+    // CSP does not consistently cover WebRTC's ICE/STUN path. Apps do not need
+    // raw peer connections — dwapps reach the mesh through the trusted parent
+    // bridge — so remove both constructor spellings before untrusted code runs.
+    let realmSealed = true;
+    for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection']) {
+      try {
+        Object.defineProperty(globalThis, name, {
+          value: undefined, writable: false, configurable: false,
+        });
+      } catch (_e) { /* verified below — failure never falls through to App code */ }
+      if (typeof globalThis[name] === 'function') realmSealed = false;
+    }
+
+    let initialized = false;
+    window.addEventListener('message', (e) => {
+      if (initialized || e.source !== window.parent) return;
+      const msg = e.data;
+      const port = e.ports?.[0];
+      if (!msg || msg.type !== 'runner-init' || !port) return;
+      initialized = true;
+      if (!realmSealed) {
+        port.postMessage({ type: 'runner-failed', reason: 'WebRTC could not be disabled.' });
+        return;
+      }
+      let received = false;
+      port.addEventListener('message', (bodyEvent) => {
+        if (received) return;
+        const msg = bodyEvent.data;
+        if (!msg || msg.type !== 'app-body') return;
+        received = true;
+
+      const html = typeof msg.html === 'string'
+        ? msg.html
+        : '<p style="padding:40px;font-family:sans-serif">empty app</p>';
+
+      // Binary App files arrive as transferred ArrayBuffers. Install the API on
+      // the Window before document.write so App scripts can use it synchronously.
+      // The App owns these buffers; the trusted parent re-reads OPFS for every
+      // later delivery instead of attempting to reuse detached transfers.
+      const receivedAssets = msg.assets && typeof msg.assets === 'object' ? msg.assets : {};
+      const entry = typeof msg.entry === 'string' ? msg.entry : 'index.html';
+      const assets = Object.create(null);
+      for (const [path, value] of Object.entries(receivedAssets)) {
+        if (value instanceof ArrayBuffer) assets[path] = value;
+      }
+      const MIME = {
+        wasm: 'application/wasm', glb: 'model/gltf-binary',
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+        webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp', ico: 'image/x-icon',
+        mp3: 'audio/mpeg', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg',
+        wav: 'audio/wav', flac: 'audio/flac', m4a: 'audio/mp4', aac: 'audio/aac',
+        mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/x-m4v',
+        ttf: 'font/ttf', otf: 'font/otf', woff: 'font/woff', woff2: 'font/woff2',
+      };
+      const normalizePath = (raw) => {
+        const value = String(raw).split(/[?#]/, 1)[0];
+        if (/^[a-z][a-z0-9+.-]*:/i.test(value) || value.startsWith('//')) return null;
+        const base = entry.includes('/') ? entry.slice(0, entry.lastIndexOf('/')).split('/') : [];
+        const parts = value.startsWith('/') ? [] : base;
+        for (const part of value.replace(/^\/+/, '').split('/')) {
+          if (!part || part === '.') continue;
+          if (part === '..') parts.pop();
+          else parts.push(part);
+        }
+        const resolved = parts.join('/');
+        if (Object.prototype.hasOwnProperty.call(assets, resolved)) return resolved;
+        const rootRelative = value.replace(/^\.?\/+/, '');
+        return Object.prototype.hasOwnProperty.call(assets, rootRelative) ? rootRelative : null;
+      };
+      const urlCache = Object.create(null);
+      const assetsApi = Object.freeze({
+        has: (path) => normalizePath(path) !== null,
+        list: () => Object.keys(assets),
+        bytes: (path) => {
+          const key = normalizePath(path);
+          return key === null ? null : new Uint8Array(assets[key]);
+        },
+        url: (path) => {
+          const key = normalizePath(path);
+          if (key === null) return null;
+          if (!urlCache[key]) {
+            const extension = key.includes('.') ? key.slice(key.lastIndexOf('.') + 1).toLowerCase() : '';
+            urlCache[key] = URL.createObjectURL(new Blob([assets[key]], {
+              type: MIME[extension] || 'application/octet-stream',
+            }));
+          }
+          return urlCache[key];
+        },
+      });
+      let dataRequestSequence = 0;
+      const dataPending = new Map();
+      const requestData = (op, key, json) => new Promise((resolve, reject) => {
+        const id = `data:${++dataRequestSequence}`;
+        const timer = setTimeout(() => {
+          dataPending.delete(id);
+          reject(new Error('App data request timed out'));
+        }, 12_000);
+        dataPending.set(id, { resolve, reject, timer });
+        window.parent.postMessage({
+          peerd: 'app:data:request', id, op,
+          ...(typeof key === 'string' ? { key } : {}),
+          ...(typeof json === 'string' ? { json } : {}),
+        }, '*');
+      });
+      const handleDataResult = (event) => {
+        if (event.source !== window.parent || event.data?.peerd !== 'app:data:result') return;
+        const pending = dataPending.get(event.data.id);
+        if (!pending) return;
+        dataPending.delete(event.data.id);
+        clearTimeout(pending.timer);
+        if (event.data.ok === true) pending.resolve(event.data.value);
+        else pending.reject(new Error(String(event.data.error || 'App data request failed').slice(0, 1_000)));
+      };
+      const dataApi = Object.freeze({
+        get: (key) => requestData('get', key),
+        set: (key, value) => {
+          let json;
+          try { json = JSON.stringify(value); }
+          catch { return Promise.reject(new TypeError('peerd.data.set value must be JSON-serializable')); }
+          if (typeof json !== 'string' || new TextEncoder().encode(json).byteLength > 1_000_000) {
+            return Promise.reject(new TypeError('peerd.data.set value is too large'));
+          }
+          return requestData('set', key, json);
+        },
+        delete: (key) => requestData('delete', key),
+        list: () => requestData('list'),
+      });
+      const requestedAgentRuntime = msg.agentRuntime && typeof msg.agentRuntime === 'object'
+        ? msg.agentRuntime : {};
+      let agentHandlers = Object.freeze({});
+      let agentCallTail = Promise.resolve();
+      let agentRuntimePoisoned = false;
+      const AGENT_CALL_TIMEOUT_MS = 10_000;
+      const AGENT_RESULT_MAX_CHARS = 100_000;
+      const agentApi = Object.freeze({
+        // A sandboxed App may reveal the trusted host drawer only in direct
+        // response to a human gesture. It cannot provide a message, submit the
+        // form, observe the transcript, or invoke a model through this method.
+        open() {
+          if (navigator.userActivation?.isActive !== true) return false;
+          window.parent.postMessage({ peerd: 'app:agent:open' }, '*');
+          return true;
+        },
+        expose(definition) {
+          if (!definition || typeof definition !== 'object') {
+            throw new TypeError('peerd.agent.expose expects an operations map');
+          }
+          const next = {};
+          if (requestedAgentRuntime.observe === true && typeof definition.observe === 'function') {
+            next.observe = definition.observe;
+          }
+          if (requestedAgentRuntime.act === true && typeof definition.act === 'function') {
+            next.act = definition.act;
+          }
+          agentHandlers = Object.freeze(next);
+          return Object.keys(next);
+        },
+      });
+      Object.defineProperty(window, 'peerd', {
+        value: Object.freeze({
+          assets: assetsApi,
+          data: dataApi,
+          agent: agentApi,
+        }),
+        writable: false,
+        configurable: false,
+      });
+      window.addEventListener('pagehide', () => {
+        for (const url of Object.values(urlCache)) URL.revokeObjectURL(url);
+      }, { once: true });
+
+      // Replace this entire document with the agent's HTML. document.
+      // write + close runs the new doc's <script> tags inline; the
+      // current script-frame stays alive until it returns, which is
+      // fine (we're about to return anyway).
+      document.open();
+      // document.open() replaces the old document and its listeners. Install
+      // the narrow host bridges and observability before parsing App markup so
+      // synchronous App calls and initial resource violations remain visible.
+      window.addEventListener('message', handleDataResult);
+      window.addEventListener('securitypolicyviolation', (event) => {
+        window.parent.postMessage({
+          type: 'app-policy-blocked',
+          directive: String(event.effectiveDirective || 'resource'),
+        }, '*');
+      });
+      document.write(html);
+      document.close();
+
+      // App-defined playtest operations are intentionally narrower than DOM
+      // automation: a dwapp opts in through peerd.json, exposes handlers here,
+      // and receives only JSON-like arguments. Results return to the trusted
+      // parent as untrusted App data. The parent pins every request to this App
+      // actor and applies its own size/timeout limits.
+      window.addEventListener('message', (event) => {
+        if (event.source !== window.parent) return;
+        const request = event.data;
+        if (request?.peerd !== 'app:agent:request'
+            || typeof request.id !== 'string' || request.id.length > 100
+            || (request.op !== 'observe' && request.op !== 'act')) return;
+        const handler = agentHandlers[request.op];
+        if (agentRuntimePoisoned) {
+          window.parent.postMessage({
+            peerd: 'app:agent:result', id: request.id, ok: false, poisoned: true,
+            error: 'App runtime generation was poisoned after a timed-out operation',
+          }, '*');
+          return;
+        }
+        if (typeof handler !== 'function') {
+          window.parent.postMessage({
+            peerd: 'app:agent:result', id: request.id, ok: false,
+            error: `App does not expose ${request.op}`,
+          }, '*');
+          return;
+        }
+        const operation = agentCallTail.catch(() => {}).then(() => {
+          // A request may have queued before the prior request timed out. Check
+          // again at execution time so it cannot overlap the late old handler.
+          if (agentRuntimePoisoned) {
+            const error = new Error('App runtime generation was poisoned after a timed-out operation');
+            error.poisoned = true;
+            throw error;
+          }
+          return new Promise((resolve, reject) => {
+            let settled = false;
+            const timer = setTimeout(() => {
+              if (settled) return;
+              settled = true;
+              agentRuntimePoisoned = true;
+              const error = new Error('App runtime operation timed out; outcome unknown');
+              error.poisoned = true;
+              reject(error);
+            }, AGENT_CALL_TIMEOUT_MS);
+            Promise.resolve().then(() => handler(request.args ?? {})).then((value) => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timer);
+              resolve(value);
+            }, (error) => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timer);
+              reject(error);
+            });
+          });
+        });
+        agentCallTail = operation.then(() => undefined, () => undefined);
+        operation.then((value) => {
+          try {
+            const encoded = JSON.stringify(value ?? null);
+            if (typeof encoded !== 'string' || encoded.length > AGENT_RESULT_MAX_CHARS) {
+              throw new Error('App runtime result is not bounded JSON');
+            }
+            window.parent.postMessage({
+              peerd: 'app:agent:result', id: request.id, ok: true, value: JSON.parse(encoded),
+            }, '*');
+          } catch (error) {
+            if (request.op === 'act') agentRuntimePoisoned = true;
+            window.parent.postMessage({
+              peerd: 'app:agent:result', id: request.id, ok: false,
+              poisoned: request.op === 'act',
+              outcomeKnown: request.op === 'act' ? false : true,
+              outcomeKind: request.op === 'act' ? 'transport-lost' : 'pre-effect-failure',
+              error: String(error?.message ?? 'App runtime result could not be cloned').slice(0, 1000),
+            }, '*');
+          }
+        }, (error) => {
+          if (request.op === 'act') agentRuntimePoisoned = true;
+          window.parent.postMessage({
+            peerd: 'app:agent:result', id: request.id, ok: false,
+            poisoned: request.op === 'act' || error?.poisoned === true,
+            outcomeKnown: request.op === 'act' ? false : error?.poisoned !== true,
+            outcomeKind: request.op === 'act' || error?.poisoned === true
+              ? 'transport-lost'
+              : 'pre-effect-failure',
+            error: String(error?.message ?? error).slice(0, 1000),
+          }, '*');
+        });
+      });
+
+      // Make ordinary media markup work without forcing every App to write a
+      // bootstrap script. Script-created consumers and CSS still use the API.
+      try {
+        const sourceNodes = document.querySelectorAll('img[src],audio[src],video[src],source[src]');
+        for (const node of sourceNodes) {
+          const raw = node.getAttribute('src');
+          const url = raw && assetsApi.url(raw);
+          if (url) node.setAttribute('src', url);
+        }
+        for (const node of document.querySelectorAll('link[rel~="icon"][href]')) {
+          const raw = node.getAttribute('href');
+          const url = raw && assetsApi.url(raw);
+          if (url) node.setAttribute('href', url);
+        }
+      } catch (_e) { /* the explicit assets API remains available */ }
+
+      // Keep the app INSIDE its sandbox. The manifest CSP is the security
+      // boundary: it refuses form actions before any untrusted script runs.
+      // This listener is the UX half — it keeps ordinary submit buttons from
+      // reloading the frame while still letting the app's own handler fire.
+      // `document` here is the app's document (document.write replaced ours),
+      // and the listener outlives this script.
+      try {
+        document.addEventListener('submit', (e) => { e.preventDefault(); }, true);
+      } catch (_e) { /* no document — nothing to guard */ }
+
+      // form.submit() bypasses the submit EVENT. Redirect it through a real,
+      // cancelable event for the same UX; form-action 'none' independently
+      // refuses the network action even if hostile code races or bypasses this.
+      try {
+        const Form = (document.defaultView || window).HTMLFormElement;
+        if (Form && Form.prototype) {
+          Form.prototype.submit = function () {
+            this.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+          };
+        }
+      } catch (_e) { /* prototype frozen / no form interface — leave default */ }
+
+      // Links are a user-mediated declassification, not ambient App authority.
+      // Keep fragments local; ask the trusted parent to validate + confirm every
+      // external HTTP(S) URL. Other schemes and relative cross-page links fail
+      // visibly through the same display-only notice.
+      try {
+        document.addEventListener('click', (event) => {
+          const target = event.target instanceof Element
+            ? event.target.closest('a[href]')
+            : null;
+          if (!target) return;
+          const raw = target.getAttribute('href') || '';
+          if (raw.startsWith('#')) return;
+          event.preventDefault();
+          window.parent.postMessage({
+            type: 'app-link', href: raw, label: (target.textContent || '').trim(),
+          }, '*');
+        }, true);
+      } catch (_e) { /* no DOM — links remain blocked by the sandbox */ }
+      });
+      port.start();
+      // The transferred port is the readiness capability. App code inherits the
+      // Window after document.write but never gets a reference to this closure.
+      port.postMessage({ type: 'runner-ready' });
+    });
+  })();
+</script>
+</body>
+</html>

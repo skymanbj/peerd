@@ -1,0 +1,111 @@
+// @ts-check
+// Shared JS-style reminder, disclosed in the RESULT of sandbox_create
+// (notebook/app kinds) — the moment the agent commits to writing Notebook or
+// App code.
+//
+// why it rides the create result, not the base system prompt: progressive
+// disclosure. Tasks that never spin up a Notebook or App don't pay the tokens,
+// and the guidance lands exactly when the agent is about to write JS — for
+// both execution kinds, from one source of truth. Kept terse on purpose
+// (context budget); it mirrors the house style enforced in eslint.config.js.
+export const CODE_STYLE_NOTE = [
+  '<code-style>',
+  'Write modern, readable JS: const/let (never var), arrow callbacks, template',
+  'literals, ?. and ??. Prefer .map()/.filter()/.forEach()/for...of over C-style',
+  'for(;;) loops. Name things in full so the code reads like its docs (renderRow,',
+  'not r). Comment the WHY, not the what.',
+  '</code-style>',
+].join('\n');
+
+// App-runtime gotcha, NOT style: the sandboxed opaque-origin iframe has no file
+// server, so cross-file ES modules don't resolve and a Worker can't load by path
+// (composeApp rewrites `new Worker('worker.js')` to a blob worker). The agent
+// burned several turns hand-rolling workers before this was written down. Lives
+// HERE (with the other create-time notes) so it has ONE source: the app arm
+// discloses it in its result (flag-OFF), and the App ACTOR — the agent that
+// actually writes the page files — gets it in its lore (flag-ON, system-prompt.js).
+export const APP_RUNTIME_NOTE = [
+  '<app-runtime>',
+  'The App runs in a sandboxed, opaque-origin iframe with NO file server, so your',
+  'page scripts CANNOT use cross-file ES modules: import/export BETWEEN your files',
+  "won't resolve (there's no URL to fetch ./other.js from) and the app silently",
+  'fails to start. Put your JS in classic <script> tags (multiple tags share ONE',
+  'global scope — define in one, use in the next) OR a single self-contained',
+  '<script type="module"> with no relative imports. Same for CSS: inline <style> or',
+  'tag-relative <link href="./x.css"> (peerd inlines those).',
+  'For heavy compute, put the work in its own file and use new Worker(\'worker.js\')',
+  "— it runs automatically (wired to a blob worker). Keep the worker self-contained:",
+  "a blob worker can't import other app files. Or tile work across",
+  'requestAnimationFrame frames; for pure no-UI compute, a Notebook/script are simpler.',
+  'Apps have NO ambient network: fetch/XHR/WebSocket/WebRTC, CDN/remote assets,',
+  'iframes, external/document navigation, form actions, downloads, and popups are blocked. Bundle JS,',
+  'CSS, and text files. For binary files such as WASM, images, audio, video, and fonts,',
+  'use contentBase64 with app_write_file or {base64} in sandbox_create files.',
+  'Known binary filename extensions are always treated as binary. Other names use the stored',
+  'file kind and byte checks. Inside the App,',
+  'window.peerd.assets.bytes(path) returns raw bytes and .url(path) returns a blob:',
+  'URL for image, media, or font consumers. Do not fetch that blob URL because the',
+  'sandbox blocks fetch. Instantiate WASM from bytes. Model-authored binary writes',
+  'are deliberately small; import or peer sharing is the practical path for large assets.',
+  'For durable JSON user content, use await window.peerd.data.get/set/delete/list.',
+  'It can write only data/<key>.json in this App working tree, so Git history can',
+  'checkpoint it. Debounce writes; Git push and dweb share include those files.',
+  'Mithril is built in as ./mithril.js. Live web/API work belongs to the web actor;',
+  'the web actor can prefetch data for a bundled snapshot, not relay a live runtime',
+  'connection into an ordinary App. Apps currently run only on Chrome. A dwapp:true App gets only the',
+  'consent-gated parent dweb bridge — call dweb_guide before building one. External',
+  'HTTP(S) links work only through peerd\'s per-click confirmation.',
+  '</app-runtime>',
+].join('\n');
+
+// CORRECTNESS, not style: the JS footguns that yield a WRONG ANSWER (silently),
+// plus the nudge to reach for the stdlib instead of hand-rolling. Disclosed
+// where the agent writes compute JS — script (once per session) and the notebook arm
+// (Notebook). Deliberately general, not a recipe for any one problem; kept terse
+// for the same context-budget reason as CODE_STYLE_NOTE.
+export const JS_PITFALLS_NOTE = [
+  '<js-correctness>',
+  'Reach for the stdlib before hand-rolling: import { sum, mean, median, stdev,',
+  'quantile, groupBy, countBy, sumBy, range, chunk, clamp, gcd, factorial, divmod,',
+  'divDecimal } from \'peerd:std\', and prefer Array methods over manual index',
+  'loops (fewer off-by-one bugs). Footguns that give a WRONG answer, not just',
+  'ugly code:',
+  '- Default to EXACT arithmetic — nothing supersedes a correct answer. Floats are',
+  '  for genuinely real-valued work (stats, geometry); never reach for them for',
+  '  integers, money, or ratios you want exact.',
+  '- Numbers lose precision past 2**53 — use BigInt (1n, a*b, a+b) for exact',
+  '  large-integer math (factorials, big sums/counters, ids). Once a value is',
+  '  BigInt, STAY in BigInt: Number(big) re-rounds it back to a lossy float — the',
+  '  #1 way an already-exact answer silently goes wrong. To DIVIDE, a/b floors and',
+  '  DROPS the fraction — use divmod(a, b) for { quotient, remainder } or',
+  '  divDecimal(a, b, places) for an exact decimal string; never Number(a)/Number(b).',
+  '  JSON has no BigInt: return String(x).',
+  '- Floats are inexact (0.1 + 0.2 !== 0.3) — never compare floats with ===; round',
+  '  for money/display.',
+  '- Default .sort() orders as STRINGS — pass a comparator for numbers,',
+  '  .sort((a, b) => a - b).',
+  '- Fanning out over many URLs? Loop chunk(urls, 5) batches with',
+  '  Promise.allSettled (bounded concurrency, per-URL failures kept) — never one',
+  '  unbounded Promise.all.',
+  'Then sanity-check the result against one value you already know before trusting it.',
+  '</js-correctness>',
+].join('\n');
+
+// The peerd:std / peerd:wasi BUILTINS reference. SCRIPT-ONLY — appended to
+// script's once-per-session first-run disclosure (script.js), NOT folded into
+// JS_PITFALLS_NOTE. why kept separate: JS_PITFALLS_NOTE ALSO rides the Notebook
+// actor's EVERY-turn system prompt (system-prompt.js), so growing it would add
+// this reference to an always-on surface unpaid — schema-diet invariant #2 (no
+// new always-on prompt surface). Here it's paid once, on the first script run.
+export const SCRIPT_BUILTINS_NOTE = [
+  '<js-builtins>',
+  'Also in \'peerd:std\' (beyond the stats/data helpers): parseJsonl, toJsonl,',
+  'parseCsv, toCsv, stripTags, textOfTag, extractLinks, dedupeBy (table/chart',
+  'need a Notebook to render). To run a compiled wasm32-wasi BINARY over an',
+  'in-memory FS, import { runWasi } from \'peerd:wasi\': await runWasi(bytes,',
+  '{ args, env, stdin, files }) → { exitCode, stdout, stderr, files } (bytes from',
+  'peerd.egress.fetch(url).bytes; the module gets NO network and sees ONLY the',
+  'files you pass; demoModule() from the same import is a known-good module —',
+  'smoke-test runWasi(demoModule()) before hunting real binaries).',
+  '</js-builtins>',
+].join('\n');

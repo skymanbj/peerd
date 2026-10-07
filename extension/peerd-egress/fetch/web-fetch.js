@@ -1,0 +1,385 @@
+// @ts-check
+// webFetch — egress wrapper for arbitrary web tools.
+//
+// safeFetch is intentionally narrow: provider endpoints ONLY. That
+// invariant defends the "even if the agent is prompt-injected, it
+// can't exfiltrate the conversation" property. The web tools (fetch_url +
+// the web actor's drive-a-tab path) need to reach arbitrary HTTPS hosts the
+// user might be reading; they go through THIS function, not safeFetch.
+//
+// What webFetch DOES enforce:
+//   - http / https schemes only (no file://, chrome://, etc.)
+//   - a PRIVATE-NETWORK block (SSRF defense): no LAN / loopback / link-local
+//     targets. The denylist can't express IP ranges, so this is a separate
+//     pure guard ahead of it (private-network.js). Closes the LAN-scan /
+//     localhost-service vector; see that file for what it deliberately does
+//     NOT cover (DNS rebinding, arbitrary public-domain exfil).
+//   - the denylist — banks, health portals, password managers, etc.
+//     The origin gate at the dispatcher already checks this for any
+//     tool that declares its origins(), but we duplicate the check
+//     here so a malformed tool that returns an empty origin list
+//     can't bypass the denylist via raw webFetch.
+//   - audit on both allow and deny so the user has visibility.
+//
+// What webFetch deliberately does NOT enforce:
+//   - a per-host allowlist. Web is fundamentally open; trying to
+//     allowlist arbitrary domains would either over-restrict (block
+//     legitimate reads) or under-restrict (defeat the point). The
+//     denylist + per-tool confirmation gates are the right knobs.
+
+import { EgressDeniedError } from './errors.js';
+import { isPrivateOrLocalHost } from './private-network.js';
+import { authOriginForRequestUrl, originSecretName, parseOriginAuth } from './origin-credentials.js';
+import { accessTokenHashFor, dpopJkt, signDpopProof } from '../dpop/keys.js';
+import { makeNonceCache, readDpopNonce, replayableRequest, shouldRetryWithNonce } from '../dpop/nonce.js';
+
+// A response we must refuse to follow. In an MV3 SW, redirect:'manual'
+// turns any 3xx into an opaqueredirect (type set, status 0). We also match
+// the real redirect statuses defensively — but NOT 300/304/305/306, which
+// are not automatic redirects (304 in particular is a valid cached reply).
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+/** @param {Response} res */
+export const isRedirect = (res) =>
+  res?.type === 'opaqueredirect' || REDIRECT_STATUSES.has(res?.status);
+
+// ── session scoping — the web actor's credential rule, AT THE BOUNDARY ──────
+//
+// peerd never uses raw fetch: every open-web request proxies through webFetch, so
+// the ONE place that can attach the user's cookies is the ONE place this rule lives.
+// The web actor (kind:'web') may carry the user's SESSION on a request ONLY when
+// the target is SAME-ORIGIN as the tab it owns — there it is already in the user's
+// session via the rendered tab, so a credentialed fetch to that origin is no
+// escalation (and the actor never holds a credential: the BROWSER attaches the
+// origin's cookies; keyless is intact). Everything CROSS-ORIGIN — or any request
+// with no owned tab — stays SESSIONLESS, so a prompt-injected actor can never point
+// a credentialed fetch at a DIFFERENT site the user is logged into and read it out.
+// The decision is the boundary's: a tool cannot opt a cross-origin request into
+// credentials, because it never supplies the credentials value at all.
+
+/**
+ * Should this request carry the user's session? Yes ONLY if it is same-origin to
+ * the actor's (trusted, SW-set) session origin. Pure.
+ * @param {string} targetUrl
+ * @param {string | null | undefined} sessionOrigin  the owned tab's origin
+ * @returns {'include' | 'omit'}
+ */
+export const sessionScopedCredentials = (targetUrl, sessionOrigin) => {
+  if (!sessionOrigin) return 'omit';                 // 0-tab state → sessionless
+  let origin;
+  try { origin = new URL(targetUrl).origin; } catch { return 'omit'; }
+  return origin === sessionOrigin ? 'include' : 'omit';
+};
+
+/**
+ * Wrap a webFetch so every request it carries is session-scoped (above). The
+ * caller's own `credentials` is IGNORED and overwritten — the boundary decides, by
+ * construction. getSessionOrigin is read PER CALL so a mid-turn tab adoption (the
+ * web actor opening its first tab) is reflected immediately.
+ * @param {(resource: any, init?: any) => Promise<Response>} webFetch
+ * @param {() => string | null | undefined} getSessionOrigin
+ * @returns {(resource: any, init?: any) => Promise<Response>}
+ */
+export const withSessionScopedCredentials = (webFetch, getSessionOrigin) => (resource, init = {}) => {
+  const url = resource instanceof Request ? resource.url : String(resource);
+  const credentials = sessionScopedCredentials(url, getSessionOrigin());
+  return webFetch(resource, { ...init, credentials });
+};
+
+// Remove any header whose name case-insensitively matches `name` (rule 5: the actor
+// must not be able to pre-seed the slot the boundary injects). fetch_url hands a plain
+// object; a non-object (Headers/array) passes through (the api actor only sends plain).
+/** @param {any} headers @param {string} name @returns {any} */
+const stripHeaderName = (headers, name) => {
+  if (!headers || typeof headers !== 'object' || Array.isArray(headers)) return headers;
+  const lower = name.toLowerCase();
+  /** @type {Record<string, any>} */
+  const out = {};
+  for (const [k, v] of Object.entries(headers)) if (k.toLowerCase() !== lower) out[k] = v;
+  return out;
+};
+
+/**
+ * DESIGN-18 P1 — the API actor's CREDENTIALED boundary fetch. Composes the two
+ * boundary credential rules for a `backing:'api'` actor, both keyed off its FIXED
+ * owned origin:
+ *   (a) SESSION SCOPING (cookies) — same as the tab web actor (sessionScopedCredentials).
+ *   (b) ORIGIN-KEY INJECTION — same-origin + https + a vault `origin:<origin>` secret →
+ *       inject the configured auth header. SINGLE-SHOT, PRE-FETCH (rule 4: webFetch keeps
+ *       refusing redirects, so the header never rides a cross-origin hop); the configured
+ *       header is STRIPPED from the caller then set LAST-WINS (rule 5); the value rides
+ *       ONLY the wire — the audit logs the header NAME + origin, never the value (rule 6);
+ *       a locked/missing vault yields no header and NO throw (rule 7).
+ * The actor stays KEYLESS: getSecret/audit are the SW's, closed over HERE, never on the
+ * actor's ctx (which the capability strip already leaves without getSecret).
+ * @param {(resource:any, init?:any)=>Promise<Response>} webFetch
+ * @param {()=>string|null|undefined} getOwnedOrigin  the actor's fixed owned origin
+ * @param {{ getSecret:(name:string)=>Promise<string|null>, audit?:(e:any)=>void }} deps
+ * @returns {(resource:any, init?:any)=>Promise<Response>}
+ */
+export const withApiCredentials = (webFetch, getOwnedOrigin, { getSecret, audit }) => async (resource, init = {}) => {
+  const url = resource instanceof Request ? resource.url : String(resource);
+  const owned = getOwnedOrigin();
+  const credentials = sessionScopedCredentials(url, owned);
+  let headers = init.headers;
+  const authOrigin = authOriginForRequestUrl(url, owned ?? undefined);
+  if (authOrigin) {
+    let secret = null;
+    try { secret = await getSecret(originSecretName(authOrigin)); }
+    catch { /* rule 7: vault locked → anonymous (public / cookie requests still work) */ }
+    const auth = secret ? parseOriginAuth(secret) : null;
+    // why the dpop refusal: a proof-of-possession token is NOT a bearer token. Sent
+    // without its `DPoP:` proof it is (a) rejected by any RFC 9449 server anyway and
+    // (b) a needless exposure of the token on the wire. This wrapper cannot mint a
+    // proof (it holds no key seam), so it fails CLOSED and sends anonymous — the
+    // credentialed path for those origins is withDpopCredentials below.
+    if (auth && auth.scheme !== 'dpop') {
+      headers = stripHeaderName(headers, auth.header);                  // rule 5: drop caller's
+      headers = { ...(headers || {}), [auth.header]: auth.value };      // last-wins
+      try { audit?.({ type: 'origin_auth_attached', details: { origin: authOrigin, header: auth.header } }); }
+      catch { /* best effort — never let auditing leak the value or throw */ }
+    }
+  }
+  return webFetch(resource, { ...init, headers, credentials });
+};
+
+// ── DPoP — proof-of-possession at the same boundary ─────────────────────────
+//
+// Tier 1 of the credential roadmap. Everything above about origin binding holds
+// unchanged; what changes is WHAT rides the wire. Instead of a bearer secret
+// (bytes: whoever holds them is the client), the origin holds an ACCESS TOKEN
+// plus a NON-EXTRACTABLE private key (peerd-egress/dpop/keys.js), and each
+// request carries a FRESHLY signed proof binding this method + this URI + now +
+// this token. A stolen token is unusable without the key, and the key cannot be
+// stolen — `exportKey` on it rejects for every caller, including us.
+//
+// The proof is minted HERE and nowhere else: it never reaches the agent, never
+// reaches an actor heap, and never survives the request. Fresh per call, so
+// there is nothing cacheable to steal either.
+
+/**
+ * The exact header slots RFC 9449 fixes. Both are stripped from the caller before
+ * either is set (rule 5), so an actor can neither pre-seed a token nor smuggle a
+ * proof of its own choosing.
+ */
+const DPOP_PROOF_HEADER = 'DPoP';
+const DPOP_AUTH_HEADER = 'Authorization';
+
+/**
+ * The credentialed boundary fetch for a PROOF-OF-POSSESSION origin (RFC 9449).
+ * A strict superset of withApiCredentials: a non-dpop secret takes the plain
+ * header path unchanged, so this is a drop-in for an actor whose origin may hold
+ * either credential kind.
+ *
+ * The eight normative rules are unchanged and re-enforced here:
+ *   2+3. `authOriginForRequestUrl` — same-origin + https ONLY. peerd never signs a
+ *        proof for a URL the actor does not own, and never over cleartext: a proof
+ *        is a signed statement of intent, so signing one for someone else's URL
+ *        would hand them an authenticated artifact.
+ *   4.   single-shot, PRE-fetch — webFetch still refuses redirects, so neither the
+ *        token nor the proof ever rides a hop to an unvalidated host.
+ *   5.   both slots stripped, then set last-wins.
+ *   6.   the audit records the origin + the public `jkt` thumbprint ONLY — never
+ *        the token, never the proof, never any key material.
+ *   7.   fail closed and SILENT: a locked vault, a missing key, or a failed
+ *        signature all send the request ANONYMOUS, with no throw. An unsigned
+ *        token is never sent as a consolation prize.
+ *   8.   the server-nonce dance (§8) is handled HERE and nowhere else: a cached
+ *        nonce rides the first proof, and a nonce challenge earns exactly ONE
+ *        re-signed retry. See dpop/nonce.js for every condition on that retry;
+ *        this function only sequences them.
+ *
+ * @param {(resource:any, init?:any)=>Promise<Response>} webFetch
+ * @param {()=>string|null|undefined} getOwnedOrigin  the actor's fixed owned origin
+ * @param {{ getSecret:(name:string)=>Promise<string|null>,
+ *           getDpopKey:(origin:string)=>Promise<{ privateKey: CryptoKey, publicJwk: any } | null>,
+ *           audit?:(e:any)=>void, now?:()=>number, randomJti?:()=>string,
+ *           nonceCache?:ReturnType<typeof makeNonceCache> }} deps
+ * @returns {(resource:any, init?:any)=>Promise<Response>}
+ */
+export const withDpopCredentials = (webFetch, getOwnedOrigin, { getSecret, getDpopKey, audit, now, randomJti, nonceCache }) => {
+  // ONE cache per wrapper, so it lives exactly as long as the actor's boundary
+  // does and is never shared across owned origins by accident (it is keyed by
+  // origin regardless — see nonce.js — this is belt and braces).
+  const nonces = nonceCache ?? makeNonceCache();
+
+  return async (resource, init = {}) => {
+    const url = resource instanceof Request ? resource.url : String(resource);
+    const owned = getOwnedOrigin();
+    const credentials = sessionScopedCredentials(url, owned);
+    const authOrigin = authOriginForRequestUrl(url, owned ?? undefined);
+    if (!authOrigin) return webFetch(resource, { ...init, headers: init.headers, credentials });
+
+    /**
+     * Build the outgoing headers for one attempt. Returns whether a PROOF was
+     * minted, because that — not "there is a credential" — is what licenses a
+     * retry: a bearer origin has no nonce dance to run.
+     * @param {string | null} nonce
+     */
+    const attach = async (nonce) => {
+      // Rule 5, UNCONDITIONALLY and BEFORE any decision: both slots the RFC fixes are
+      // cleared the moment we know this request is to the owned origin. why not inside
+      // the "we minted a proof" branch, where these used to live: every path that does
+      // NOT mint one — locked vault, no stored secret, a bearer secret, a failed
+      // signature — then left a CALLER-SUPPLIED `DPoP:` header standing on a request
+      // to the credentialed origin. The actor is untrusted; a header it chose must
+      // never reach the owned server in the slot the boundary owns, whether or not the
+      // boundary ends up filling it. Clearing first also makes "we sent nothing" mean
+      // exactly that. Re-run per attempt, so the retry re-derives from the CALLER's
+      // headers rather than layering on the first attempt's.
+      let headers = stripHeaderName(init.headers, DPOP_AUTH_HEADER);
+      headers = stripHeaderName(headers, DPOP_PROOF_HEADER);
+      // ONE try/catch around the whole credential attempt: rule 7 says every failure
+      // mode — locked vault, absent key, unsupported crypto, a throwing audit sink —
+      // degrades to the same anonymous request rather than surfacing to the caller.
+      try {
+        const secret = await getSecret(originSecretName(authOrigin));
+        const auth = secret ? parseOriginAuth(secret) : null;
+        if (auth && auth.scheme === 'dpop' && auth.token) {
+          const key = await getDpopKey(authOrigin);
+          if (key?.privateKey && key.publicJwk) {
+            // init.method wins over a Request's own method, mirroring fetch itself, so
+            // the `htm` we bind is the method that actually goes out.
+            const method = typeof init.method === 'string' ? init.method
+              : (resource instanceof Request ? resource.method : 'GET');
+            const proof = await signDpopProof({
+              privateKey: key.privateKey,
+              publicJwk: key.publicJwk,
+              method,
+              url,
+              // A retry re-signs from scratch — new jti, new iat, the new nonce.
+              // Re-sending the first proof with a nonce bolted on is not a thing
+              // that exists: the claims are inside the signature.
+              jti: (randomJti ?? (() => crypto.randomUUID()))(),
+              iatSeconds: Math.floor((now ?? Date.now)() / 1000),
+              accessTokenHash: await accessTokenHashFor(auth.token),
+              nonce: nonce ?? undefined,
+            });
+            if (proof) {
+              // Both slots are already empty (stripped above) — set ours, last-wins.
+              headers = { ...(headers || {}), [DPOP_AUTH_HEADER]: auth.value, [DPOP_PROOF_HEADER]: proof };
+              const jkt = await dpopJkt(key.publicJwk);
+              // The audit records origin + public thumbprint ONLY (rule 6). `nonced`
+              // is a boolean, never the nonce: the log says which posture the request
+              // went out under without carrying the server's freshness state.
+              try { audit?.({ type: 'dpop_auth_attached', details: { origin: authOrigin, jkt, nonced: Boolean(nonce) } }); }
+              catch { /* best effort — never let auditing leak a value or throw */ }
+              return { headers, minted: true };
+            }
+          }
+        } else if (auth) {
+          // A plain bearer/raw secret on this origin: identical to withApiCredentials.
+          headers = stripHeaderName(headers, auth.header);
+          headers = { ...(headers || {}), [auth.header]: auth.value };
+          try { audit?.({ type: 'origin_auth_attached', details: { origin: authOrigin, header: auth.header } }); }
+          catch { /* best effort */ }
+        }
+      } catch { /* rule 7: anonymous, never a throw, never an unsigned token */ }
+      return { headers, minted: false };
+    };
+
+    const sentNonce = nonces.get(authOrigin);
+    const first = await attach(sentNonce);
+    const response = await webFetch(resource, { ...init, headers: first.headers, credentials });
+
+    // Learn from EVERY response, not just the challenges: RFC 9449 lets a server
+    // rotate its nonce on a success too, and the next request should carry the
+    // new one rather than eat a 401 to discover it.
+    const freshNonce = readDpopNonce(response);
+    if (freshNonce) nonces.set(authOrigin, freshNonce);
+
+    if (!shouldRetryWithNonce(response, {
+      minted: first.minted,
+      sentNonce,
+      freshNonce,
+      replayable: replayableRequest(resource, init),
+    })) return response;
+
+    const retry = await attach(freshNonce);
+    // If the second signing failed (vault locked between attempts, key revoked),
+    // rule 7 still holds: hand back the server's own answer rather than sending
+    // an unsigned request. The first response is the honest result.
+    if (!retry.minted) return response;
+
+    try { audit?.({ type: 'dpop_nonce_retry', details: { origin: authOrigin, status: response?.status } }); }
+    catch { /* best effort */ }
+    // The first response is being discarded, so release its body. Best effort:
+    // a stub response has none, and a failed cancel must not sink the retry.
+    try { await /** @type {any} */ (response)?.body?.cancel?.(); } catch { /* ignore */ }
+    const retried = await webFetch(resource, { ...init, headers: retry.headers, credentials });
+    const rotated = readDpopNonce(retried);
+    if (rotated) nonces.set(authOrigin, rotated);
+    return retried;
+  };
+};
+
+/**
+ * Factory for the web-tool fetch wrapper.
+ *
+ * @param {Object} deps
+ * @param {() => readonly string[]} deps.getDenylist  current denylist patterns
+ * @param {(host: string, patterns: readonly string[]) => boolean} deps.matchDenylist
+ *   pure matcher (passed in to avoid a cross-module import here)
+ * @param {(partial: { type: string, details?: Record<string, any> }) => Promise<void>} [deps.audit]
+ * @param {typeof fetch} [deps.fetchFn]
+ */
+export const makeWebFetch = ({ getDenylist, matchDenylist, audit, fetchFn }) => {
+  const _fetch = fetchFn ?? fetch;
+  const _audit = audit ?? (async () => {});
+  /**
+   * @param {RequestInfo | URL} resource
+   * @param {RequestInit} [init]
+   * @returns {Promise<Response>}
+   */
+  return async (resource, init) => {
+    const urlString = resource instanceof Request ? resource.url
+      : resource instanceof URL ? resource.toString()
+      : resource;
+    // why on the audit: the code-mode bridge now sends full HTTP, so the log
+    // must distinguish a GET read from a POST write (a wider surface to see).
+    const method = (init && typeof init.method === 'string' ? init.method : 'GET').toUpperCase();
+    let u;
+    try { u = new URL(urlString); }
+    catch {
+      _audit({ type: 'egress_denied', details: { url: String(urlString), reason: 'invalid_url' } }).catch(() => {});
+      throw new EgressDeniedError(String(urlString));
+    }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+      _audit({ type: 'egress_denied', details: { origin: u.origin, reason: `scheme:${u.protocol}` } }).catch(() => {});
+      throw new EgressDeniedError(u.origin);
+    }
+    // SSRF block: no LAN / loopback / link-local targets. Ahead of the denylist
+    // because the denylist can't express IP ranges. (Provider calls to a local
+    // Ollama go through safeFetch/the allowlist, NOT here — so no carve-out.)
+    if (isPrivateOrLocalHost(u.hostname)) {
+      _audit({ type: 'egress_denied', details: { origin: u.origin, reason: 'private_network' } }).catch(() => {});
+      // Tag the reason so fetch_url can tell the model this is an SSRF block on a
+      // private/loopback host — NOT "the site is unreachable" — and steer it to
+      // RENDER the page instead of giving up (the web-actor fetch-vs-read fix).
+      throw new EgressDeniedError(u.origin, 'private_network');
+    }
+    // u.hostname (not u.host): the denylist matches bare hostnames; u.host
+    // carries :port. (The matcher also normalizes defensively — see denylist.js.)
+    const denylisted = matchDenylist(u.hostname, getDenylist());
+    if (denylisted) {
+      _audit({ type: 'egress_denied', details: { origin: u.origin, reason: 'denylist', method } }).catch(() => {});
+      throw new EgressDeniedError(u.origin);
+    }
+    // Redirects fail closed. A 3xx to a different host would re-open every
+    // gate above (scheme / SSRF private-network / denylist) against an
+    // UN-checked target — e.g. a public host that 302s to 169.254.169.254
+    // or to a denylisted bank. MV3 service-worker fetch cannot read a
+    // redirect's Location header (redirect:'manual' returns an opaque,
+    // header-less response), so we cannot re-validate and follow per hop;
+    // we refuse the redirect instead. Forced regardless of the caller's
+    // redirect mode (primitives.js used to ask for 'follow').
+    const res = await _fetch(resource, { ...init, redirect: 'manual' });
+    if (isRedirect(res)) {
+      _audit({ type: 'egress_denied', details: { origin: u.origin, reason: 'redirect_blocked', status: res.status } }).catch(() => {});
+      throw new EgressDeniedError(u.origin, 'redirect_blocked');
+    }
+    // why: audit successful web fetches too. The "what URLs has the
+    // agent touched?" question becomes answerable from the audit log.
+    _audit({ type: 'web_fetch', details: { origin: u.origin, path: u.pathname, method } }).catch(() => {});
+    return res;
+  };
+};

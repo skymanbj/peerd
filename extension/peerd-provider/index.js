@@ -1,0 +1,141 @@
+// @ts-check
+// peerd-provider — public surface.
+//
+// Exports the registry helpers (callModel, listProviders, getProvider,
+// registerProvider) plus error classes and adapter metadata. The
+// agent loop in peerd-runtime calls into this module via callModel
+// and never imports adapter modules directly — that keeps runtime
+// agnostic to which providers exist.
+//
+// Shipped (cloud, BYOK): Anthropic, OpenRouter, OpenAI, Z.ai GLM.
+// Local (keyless): Ollama, plus the WebGPU on-device runner (gated on the
+// resident engine). The registry is the source of truth — see registry.js.
+
+export {
+  callModel,
+  listProviders,
+  listProviderModels,
+  providerModelContextWindow,
+  getProvider,
+  registerProvider,
+  unregisterProvider,
+  // custom-provider support: validate names against the full set, and tell a
+  // user-added adapter apart from a built-in one.
+  listProviderNames,
+  isCustomProvider,
+  customProviderBaseUrl,
+} from './registry.js';
+
+// Custom OpenAI-compatible provider factory — builds a per-endpoint adapter
+// (DeepSeek, Together AI, Groq, local llama.cpp, …) with its own name, baseUrl
+// and vault secret. See adapters/openai-compat.js.
+export { makeOpenAiCompatAdapter } from './adapters/openai-compat.js';
+
+// Custom-provider persistence (KV-backed, versioned key). Import-free (kv
+// injected) so it is bun-unit-testable with fakes. See custom-providers.js.
+export {
+  CUSTOM_PROVIDERS_KV_KEY,
+  loadCustomProviders,
+  saveCustomProviders,
+  addCustomProvider,
+  removeCustomProvider,
+  updateCustomProvider,
+  customSecretName,
+  sanitizeProviderId,
+  isReservedName,
+  originFromUrl,
+  customProviderOrigins,
+} from './custom-providers.js';
+
+// Pure resolution of the web actor model. The SW resolves it when minting a web
+// actor session; once the local WebGPU runner ships it slots in as the on-device
+// rung. See runner-model.js.
+export { resolveRunnerModel, resolveRunnerTarget } from './runner-model.js';
+
+export {
+  ProviderError,
+  ProviderHttpError,
+  ProviderKeyMissingError,
+  ProviderUsageLimitError,
+  UnknownProviderError,
+  OllamaNotRunningError,
+} from './errors.js';
+
+// Pure classification of provider error bodies (hard usage/credit limit vs
+// transient throttle) — the adapters use it; exported so the chassis/tests can
+// reason about a failure body too.
+export { isUsageLimitResponse, apiErrorMessage } from './error-classify.js';
+
+// Provider failover (switch-and-continue): shouldFailover classifies a
+// failure as one a DIFFERENT provider could get past (exhausted overload /
+// hard usage limit); planFailoverChain orders the candidate {provider,model}
+// list. The SW wraps callModel with these. See failover.js.
+export { shouldFailover, planFailoverChain } from './failover.js';
+
+// Adapter metadata + default model are exposed so chassis UI (settings
+// view in the side panel) can render "you are using Anthropic, model
+// claude-sonnet-4-6". The live `call` reference stays inside the
+// adapter; UI never calls it directly.
+export { anthropicAdapter, DEFAULT_MODEL as ANTHROPIC_DEFAULT_MODEL } from './adapters/anthropic.js';
+export {
+  openrouterAdapter,
+  DEFAULT_MODEL as OPENROUTER_DEFAULT_MODEL,
+  // Live gateway catalog + the curated "popular" seed, for the Settings
+  // model-curation picker. listOpenRouterModels doubles as the key-verify probe.
+  listOpenRouterModels,
+  OPENROUTER_POPULAR,
+} from './adapters/openrouter.js';
+export {
+  openaiAdapter,
+  DEFAULT_MODEL as OPENAI_DEFAULT_MODEL,
+  OPENAI_POPULAR,
+} from './adapters/openai.js';
+export { ollamaAdapter, DEFAULT_MODEL as OLLAMA_DEFAULT_MODEL } from './adapters/ollama.js';
+// Z.ai GLM — OpenAI-compatible direct endpoint (api.z.ai/api/paas/v4).
+export { glmAdapter, DEFAULT_MODEL as GLM_DEFAULT_MODEL } from './adapters/glm.js';
+// local WebGPU runner (FEATURE-LOCAL-WEBGPU B). setLocalGenerate wires the
+// offscreen engine bridge at SW boot; LOCAL_MODEL_ID is the resident model.
+export {
+  localWebgpuAdapter, LOCAL_MODEL_ID, setLocalGenerate,
+  // future-proof seam: lets the offscreen engine report the resident model's
+  // live context window through the unified provider context-window seam.
+  setLocalModelInfo,
+} from './adapters/local-webgpu.js';
+// Hardware gate for local WebGPU models: the probe (document contexts only) +
+// the pure capable/not judge + per-model min-specs. Powers the Settings "Test" button.
+// The spec table is also the ENGINE's load recipe (repo/class/dtype), so a new
+// on-device model is a registry entry rather than engine surgery.
+export {
+  MODEL_SPECS, DEFAULT_LOCAL_MODEL_ID, listLocalModelSpecs, localModelSpec,
+  probeLocalModelCapability, judgeModelCapability,
+} from './local-model-capability.js';
+
+// "Which local model fits this machine?" — the probe (document contexts
+// only; reads navigator.gpu) + the pure recommendation logic + the tier
+// table, for the Settings Ollama card. See ollama-recommend.js.
+export {
+  OLLAMA_MODEL_TIERS,
+  probeGpuCapability,
+  estimateUsableMemGB,
+  recommendOllamaModel,
+} from './ollama-recommend.js';
+
+// Local pricing table + cost math for the cost/usage meter (feature 06).
+// Pure data + arithmetic — no network. The agent loop accumulates usage;
+// the SW multiplies it by these rates (with user overrides) client-side.
+export { DEFAULT_PRICING, costOf, resolvePricing, hasPricing } from './pricing.js';
+
+// Pure key-format sanity, shared by the options Providers card and the
+// onboarding provider step (§5h) so the paste rule can never drift.
+export { KEY_PREFIX, checkApiKeyFormat } from './key-format.js';
+
+// Per-model context-window table + resolver. The long-session trim layer
+// scales its trigger to a fraction of the ACTIVE model's window (dynamic,
+// not a fixed token count). Same static-snapshot + user-override + live-
+// value posture as pricing.js — no network at module load.
+export {
+  DEFAULT_CONTEXT_WINDOWS,
+  DEFAULT_CONTEXT_WINDOW,
+  resolveContextWindow,
+  contextWindowFor,
+} from './context-window.js';

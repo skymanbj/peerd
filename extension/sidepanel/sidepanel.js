@@ -1,0 +1,483 @@
+// @ts-check
+// Side-panel entry point.
+//
+// Wires up:
+//   - The long-lived port to the SW (for state push + streaming events)
+//   - The Mithril router and top-level mount
+//   - The one-shot sendMessage helper for user actions
+//
+// All business logic lives in the SW. This file is a projection of SW
+// state. User actions emit messages; SW reduces; SW emits new state; we
+// re-render. Streaming deltas patch in place via a small reducer so we
+// don't refetch the whole session shape per token.
+
+import m from '/vendor/mithril/mithril.js';
+import browser from '/vendor/browser-polyfill.js';
+import { App } from './components/app.js';
+import { classifyBrowserAutomationTarget, createVoiceManager } from '/peerd-runtime/index.js';
+import { findDenylistMatch } from '/peerd-egress/index.js';
+import { INITIAL_STATE, reduceChat, putSpawnedSession } from './chat-reducer.js';
+import { eventBelongsToSidepanelWindow, focusBrowserTab } from './tab-context.js';
+
+/** @typedef {import('./chat-reducer.js').ChatState} ChatState */
+/** @typedef {import('./chat-reducer.js').ReducerMsg} ReducerMsg */
+
+/** @type {ChatState} */
+let currentState = INITIAL_STATE;
+
+// Long-lived port to the SW. We keep `port` rebindable so we can
+// reconnect after a SW restart (extension reload, 30s-idle timeout
+// before the offscreen keepalive spawns, browser crash recovery, ...).
+// On disconnect, we reset our local state to the locked-vault default
+// — otherwise the UI would show a stale "unlocked" state after a SW
+// restart, and the user's next action would fail confusingly.
+/** @type {any} */
+let port = null;
+const connectPort = () => {
+  const connectedPort = browser.runtime.connect({ name: 'sidepanel' });
+  port = connectedPort;
+  connectedPort.onMessage.addListener(handlePortMessage);
+  connectedPort.onDisconnect.addListener(handlePortDisconnect);
+  // Chrome can establish this port while a cold MV3 module worker is still
+  // linking, before its onConnect listener exists. In that race Chrome neither
+  // replays the event nor disconnects the orphaned port, so the historical
+  // push-on-connect contract leaves the panel on its placeholder state forever.
+  // A one-shot message is queued independently; retry it until the worker's
+  // dispatcher is live, then fold the reply through the same state reducer.
+  void requestInitialState(connectedPort);
+};
+
+
+/** @param {unknown} raw */
+const handlePortMessage = (raw) => {
+  const msg = /** @type {ReducerMsg & { ok?: boolean }} */ (raw);
+  if (!msg || typeof msg.type !== 'string') return;
+  // Voice events are side-panel-only — the voice manager lives HERE; route
+  // them to its subscribers (they don't touch chat state). On a successful
+  // permission grant, clear any sticky mic error so the UI resets.
+  if (msg.type.startsWith('voice/')) {
+    if (msg.type === 'voice/permission-result' && msg.ok) voiceManager?.clearError?.();
+    for (const h of voicePortSubscribers) {
+      try { h(msg); } catch (e) { console.error('[sidepanel] voice subscriber threw', e); }
+    }
+    return;
+  }
+  // Everything else folds through the shared pure reducer (DESIGN-12) so home
+  // and the side panel stay byte-identical projections of the SW session.
+  // §4e: a confirm settle carries WHICH surface answered; the reducer needs to
+  // know which surface it is folding FOR, so the answering surface doesn't
+  // transcript-line its own click.
+  const folded = msg.type === 'confirm/resolved' ? { ...msg, confirmSurface: 'sidepanel' } : msg;
+  const next = reduceChat(currentState, folded);
+  if (next === currentState) return; // guarded bail / live complement — nothing changed
+  currentState = next;
+  // Side-panel-only: the voice manager doesn't survive the panel, so re-enable
+  // it on a full snapshot when the persisted setting says it was on.
+  if (msg.type === 'state') maybeRestoreVoice(currentState);
+  m.redraw();
+};
+
+/**
+ * Establish the initial snapshot even if the port's onConnect event was lost
+ * while the cold worker registered its listeners.
+ * @param {any} connectedPort
+ */
+const requestInitialState = async (connectedPort) => {
+  /** @param {string} type */
+  const waitForReply = async (type) => {
+    let retryMs = 100;
+    while (port === connectedPort && !currentState.hydrated) {
+      // A send begun before onMessage registration can remain pending forever
+      // on Chrome instead of rejecting. Bound each attempt so a lost startup
+      // message cannot prevent the next one from reaching a live listener.
+      const reply = /** @type {{ ok?: boolean, state?: any } | null }} */ (
+        await Promise.race([
+          browser.runtime.sendMessage({ type }).catch(() => null),
+          new Promise((resolve) => setTimeout(() => resolve(null), 1_000)),
+        ])
+      );
+      if (reply?.ok) return reply;
+      await new Promise((resolve) => setTimeout(resolve, retryMs));
+      retryMs = Math.min(1_000, retryMs * 2);
+    }
+    return null;
+  };
+
+  // bootstrap/ready is registered early and deliberately holds its response
+  // channel open until the unified privileged dispatcher exists. That pending
+  // event prevents Chrome from retiring a cold worker halfway through boot.
+  if (!await waitForReply('bootstrap/ready')) return;
+  const reply = await waitForReply('state/get');
+  if (port === connectedPort && reply?.state) {
+    handlePortMessage({ type: 'state', state: reply.state });
+  }
+};
+
+const handlePortDisconnect = () => {
+  console.warn('[sidepanel] SW port disconnected — reconnecting');
+  // Pessimistically assume any in-memory unlocked state is stale: the
+  // SW just died, taking its vault DK with it. Show the lock screen
+  // until we get a fresh state push.
+  currentState = {
+    ...currentState,
+    // The old snapshot is no longer authoritative until the revived SW replies.
+    hydrated: false,
+    // why: prfEnrolled is kept across the disconnect — it's a persistent
+    // vault property, not a session one, so the Touch ID button shouldn't
+    // flicker away while we reconnect.
+    vault: { ...currentState.vault, locked: true, unlockedAt: 0 },
+    providers: { ...currentState.providers, hasKey: false },
+    lastError: null,
+    // why reset these: they are SW-OWNED ephemeral projections. The SW just
+    // died with its confirm coordinator, turn slots, ralph/goal drivers and
+    // notice queue — so a stale confirm modal (now UNANSWERABLE: the coordinator
+    // that owned the prompt is gone), rate-limit banner, Stop spinner, notice,
+    // or goal-run pill would linger with nothing behind it. Reset to the
+    // INITIAL_STATE defaults; a revived SW replays anything genuinely still live
+    // through the fresh owner-scoped state snapshot.
+    pendingConfirm: null,
+    rateLimit: null,
+    streaming: false,
+    notices: INITIAL_STATE.notices,
+    goalRuns: INITIAL_STATE.goalRuns,
+    // why: actors/spawned/asyncTasks are SW-OWNED live projections too. A card
+    // created with {streaming:true} would otherwise linger as a stuck 'working…'
+    // chip — the SW that drove it died, and its boot redrain re-runs the turn
+    // with no parentToolUseId, so the card never receives turn/actor-done. Reset
+    // them; a revived SW re-seeds anything still live via turn/actor-state.
+    actors: INITIAL_STATE.actors,
+    actorProjectionEpoch: INITIAL_STATE.actorProjectionEpoch,
+    actorProjectionRevision: INITIAL_STATE.actorProjectionRevision,
+    spawned: INITIAL_STATE.spawned,
+    asyncTasks: INITIAL_STATE.asyncTasks,
+  };
+  m.redraw();
+  port = null;
+  // Small backoff to avoid tight-looping if the SW is unhealthy.
+  // Reconnecting also revives the SW, which then pushes a fresh state.
+  setTimeout(connectPort, 200);
+};
+
+connectPort();
+
+/**
+ * One-shot sendMessage for typed request/response.
+ * @param {object} msg
+ * @returns {Promise<any>}
+ */
+const send = (msg) => browser.runtime.sendMessage(msg);
+
+// Lazy-load an actor session for a nested transcript. Used when the
+// user expands an actor_create card whose child wasn't streamed live
+// (e.g. after a side-panel reload). Deduped by an in-flight set so a
+// re-expand mid-fetch doesn't fire a second request.
+/** @type {Set<string>} */
+const actorFetchInFlight = new Set();
+/** @param {string} sessionId */
+const loadActor = (sessionId) => {
+  if (!sessionId) return;
+  if (currentState.spawned.sessions[sessionId]?.messages?.length) return;
+  if (actorFetchInFlight.has(sessionId)) return;
+  actorFetchInFlight.add(sessionId);
+  send({ type: 'session/get', sessionId }).then((resp) => {
+    actorFetchInFlight.delete(sessionId);
+    if (resp?.ok && resp.session) {
+      currentState = putSpawnedSession(currentState, resp.session);
+      m.redraw();
+    }
+  }).catch(() => { actorFetchInFlight.delete(sessionId); });
+};
+
+// Reentry guard for voice auto-restore so a chatty state push doesn't
+// fire enable() ten times. Cleared back to null on disable so a future
+// re-enable triggers it again.
+let voiceRestoreAttempted = false;
+/** @param {ChatState} state */
+const maybeRestoreVoice = (state) => {
+  // why: only restore once per side-panel mount. If the user disables
+  // voice and re-enables, that path goes through settings → voiceManager
+  // directly and doesn't need this guard.
+  if (voiceRestoreAttempted) return;
+  // why: don't auto-enable voice during the lock screen; the user
+  // expects the mic to appear after they unlock, not before.
+  if (!state?.vault?.initialized || state?.vault?.locked) return;
+  if (!state?.settings?.voiceEnabled) return;
+  if (!voiceManager) return;
+  if (voiceManager.getState().status !== 'idle') return;
+  voiceRestoreAttempted = true;
+  // why: enable() coerces any stored variant to the single shipped model,
+  // so we just hand it whatever's persisted (an old install may carry a
+  // bogus 'small') — no fallback literal that could itself be wrong.
+  voiceManager.enable({
+    variant: state.settings.voiceVariant,
+    engine: /** @type {'auto'|'web-speech'|'moonshine'|undefined} */ (state.settings.voiceEngine),
+  }).catch((/** @type {unknown} */ e) => {
+    // The settings.voiceEnabled flag stays true; the manager's state
+    // carries the error so the UI can surface it. No need to flip the
+    // persisted setting — the user explicitly opted in, and a transient
+    // failure shouldn't lose that intent.
+    console.warn('[sidepanel] voice restore failed', /** @type {{ message?: string }} */ (e)?.message ?? e);
+  });
+};
+
+// ---------- voice manager (lives in the side panel) ------------------------
+//
+// The manager is a per-side-panel-lifetime singleton. It uses runtime
+// sendMessage for outbound (the offscreen doc handles the dispatch)
+// and a tiny pub/sub layer over our port subscribers for inbound
+// voice/chunk + voice/auto-stop pushes (the SW forwards those to the
+// port we already hold).
+
+/** @type {Set<(msg: any) => void>} */
+const voicePortSubscribers = new Set();
+/** @param {(msg: any) => void} handler */
+const onVoiceMessage = (handler) => {
+  voicePortSubscribers.add(handler);
+  return () => voicePortSubscribers.delete(handler);
+};
+const voiceManager = createVoiceManager({
+  send,
+  onMessage: onVoiceMessage,
+  moonshineHostAvailable: () => currentState?.capabilities?.moonshineVoiceHost?.status === 'available',
+});
+
+// Global ESC: stop voice anywhere in the side panel. Lower priority
+// than form-local handlers (those run before document-level events
+// can intercept). The directive calls this out explicitly — the user
+// should never have to hunt for the mic button to stop listening.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!voiceManager.isListening()) return;
+  voiceManager.stop().catch(() => {});
+});
+
+const root = document.getElementById('app');
+if (!root) throw new Error('sidepanel: #app missing from HTML');
+
+// UI-only state actions. Distinct from `send` (which posts to the SW);
+// these mutate side-panel-local state and trigger a redraw.
+// (VM management actions were removed with the chip — VM tabs live in
+// the Chrome tab strip; agent vm_* tools do everything else.)
+// Answer a pending confirmation prompt: post the user's choice to the SW
+// (which resolves the dispatcher's waiting Promise) and clear the prompt
+// locally so the modal dismisses immediately.
+/**
+ * @param {{ id: string, ownerSessionId?: string|null, sessionId?: string|null,
+ *   dispatchId?: string|null }} prompt
+ * @param {string} answer
+ */
+const confirmAnswer = (prompt, answer) => {
+  send({
+    type: 'confirm/answer', id: prompt.id, answer,
+    ownerSessionId: prompt.ownerSessionId ?? null,
+    sessionId: prompt.sessionId ?? null,
+    dispatchId: prompt.dispatchId ?? null,
+  });
+  currentState = { ...currentState, pendingConfirm: null };
+  m.redraw();
+};
+
+// Dismiss a transient system notice (e.g. an /init progress banner).
+/** @param {number} id */
+const dismissNotice = (id) => {
+  currentState = { ...currentState, notices: currentState.notices.filter((n) => n.id !== id) };
+  m.redraw();
+};
+
+// Turn advanced automation on from the nudge. This flips the
+// advancedAutomationEnabled SETTING — the `debugger` permission itself is
+// required at install (Chrome refuses to list it as optional), so no
+// permission ceremony or user-gesture plumbing is involved. On success we
+// clear the nudge; on failure we leave a short note.
+/** @param {number} [noticeId] */
+const requestDebugger = async (noticeId) => {
+  let ok = false;
+  try {
+    const r = await send({ type: 'settings/update', patch: { advancedAutomationEnabled: true } });
+    ok = !!r?.ok;
+  } catch (e) {
+    console.warn('[sidepanel] advanced-automation enable failed', e);
+  }
+  if (ok) {
+    currentState = {
+      ...currentState,
+      notices: currentState.notices.filter((n) => n.action?.kind !== 'grant-debugger'),
+    };
+  } else if (noticeId != null) {
+    currentState = {
+      ...currentState,
+      notices: currentState.notices.map((n) => (n.id === noticeId
+        ? { ...n, text: '高级自动化保持关闭。你可以稍后在 设置 → 高级 中开启。', action: null }
+        : n)),
+    };
+  }
+  m.redraw();
+  return ok;
+};
+
+// "Open ↗" on the agent-tab card activates the tab and focuses its window.
+// The card persists until that live agent tab closes.
+/** @param {number} tabId @param {number|undefined} windowId */
+const openAgentTab = async (tabId, windowId) => {
+  const focused = await focusBrowserTab(browser, tabId, windowId);
+  if (!focused) console.warn('[sidepanel] focus tab failed');
+};
+
+// A card action types the user's likely next message INTO the composer (§4c) -
+// it never sends. The nonce makes each click a fresh one-shot for the InputBar
+// to consume; the user edits or discards like any draft.
+let prefillNonce = 0;
+/** @param {string} text */
+const prefillComposer = (text) => {
+  if (typeof text !== 'string' || !text.trim()) return;
+  prefillNonce += 1;
+  currentState = { ...currentState, composerPrefill: { text, nonce: prefillNonce } };
+  m.redraw();
+};
+const uiActions = { loadActor, confirmAnswer, dismissNotice, requestDebugger, openAgentTab, prefillComposer };
+
+// ---- brand hand-off: is the options tab the active one? -------------------
+//
+// Explicit, independently-tracked state (NOT derived from the router): when
+// the user opens Settings, the options page becomes the active tab in this
+// window. Surfacing that lets the brand wordmark hand off across the two
+// surfaces — it plays its reverse "self-delete" in the panel while options is
+// foregrounded, and renders back in when you leave. Best-effort: any tabs-API
+// gap simply leaves the logo present (fail-safe — never permanently gone).
+// Hand off to ANY peerd full-tab surface — the options page AND the
+// home/Library page — so the panel mark self-deletes whenever one is
+// foregrounded and renders back when you leave.
+const FULLPAGE_URLS = (() => {
+  try {
+    return [
+      browser.runtime.getURL('options/options.html'),
+      browser.runtime.getURL('home/home.html'),
+    ];
+  } catch { return []; }
+})();
+let optionsActive = false;
+// The fresh-chat starter distinguishes a public page from a policy-protected
+// page without carrying its address into UI state. Unknown is intentionally not
+// summarizable: a failed denylist read must not advertise work the host may
+// refuse when the user clicks it.
+/** @typedef {'none'|'unknown'|'web'|'protected_private'|'protected_sensitive'} ActiveTabStatus */
+/** @type {ActiveTabStatus} */
+let activeTabStatus = 'none';
+let activeTabRefreshGeneration = 0;
+/** @type {number|null} */
+let sidepanelWindowId = null;
+const resolveSidepanelWindowId = async () => {
+  if (Number.isInteger(sidepanelWindowId)) return sidepanelWindowId;
+  try {
+    const current = await browser.windows?.getCurrent?.();
+    if (typeof current?.id === 'number' && Number.isInteger(current.id)) {
+      sidepanelWindowId = current.id;
+      return sidepanelWindowId;
+    }
+  } catch { /* fall through to the tab-scoped lookup */ }
+  try {
+    const current = (await browser.tabs.query({ active: true, currentWindow: true }))[0];
+    if (typeof current?.windowId === 'number' && Number.isInteger(current.windowId)) {
+      sidepanelWindowId = current.windowId;
+    }
+  } catch { /* the caller keeps the fail-safe unknown state */ }
+  return sidepanelWindowId;
+};
+/**
+ * @param {number|null} [preferredTabId]
+ * @param {number|null} [eventWindowId]
+ */
+const refreshOptionsActive = async (preferredTabId = null, eventWindowId = null) => {
+  if (!FULLPAGE_URLS.length || !browser.tabs?.query) return;
+  const windowId = await resolveSidepanelWindowId();
+  if (!eventBelongsToSidepanelWindow(windowId, eventWindowId)) return;
+  const generation = ++activeTabRefreshGeneration;
+  try {
+    const tab = typeof preferredTabId === 'number' && browser.tabs?.get
+      ? await browser.tabs.get(preferredTabId)
+      : (await browser.tabs.query(typeof windowId === 'number'
+        ? { active: true, windowId }
+        : { active: true, currentWindow: true }))[0];
+    if (Number.isInteger(windowId) && Number.isInteger(tab?.windowId)
+        && tab.windowId !== windowId) return;
+    const url = tab?.url;
+    const next = !!(url && FULLPAGE_URLS.some((u) => url.startsWith(u)));
+    /** @type {ActiveTabStatus} */
+    let nextStatus = 'none';
+    if (url && /^https?:\/\//i.test(url)) {
+      const verdict = classifyBrowserAutomationTarget(url);
+      if (!verdict.allowed) {
+        nextStatus = verdict.reason === 'private_network' || verdict.reason === 'cloud_metadata'
+          ? 'protected_private'
+          : 'none';
+      } else {
+        nextStatus = 'unknown';
+        try {
+          const snapshot = await send({ type: 'denylist/list' });
+          if (snapshot?.ok && Array.isArray(snapshot.patterns)) {
+            const hostname = new URL(url).hostname;
+            nextStatus = findDenylistMatch(hostname, snapshot.patterns)
+              ? 'protected_sensitive'
+              : 'web';
+          }
+        } catch { /* keep the fail-safe unknown state */ }
+      }
+    }
+    // A tab switch can finish while the denylist request is in flight. Only the
+    // latest refresh may update what the starter offers.
+    if (generation !== activeTabRefreshGeneration) return;
+    if (next !== optionsActive || nextStatus !== activeTabStatus) {
+      optionsActive = next;
+      activeTabStatus = nextStatus;
+      // The harness hosts this surface in a tab, where switching foreground
+      // tabs can throttle animation-frame redraws. A synchronous redraw also
+      // keeps the real side panel's page-aware starter current immediately.
+      m.redraw.sync();
+    }
+  } catch {
+    if (generation === activeTabRefreshGeneration && activeTabStatus !== 'unknown') {
+      activeTabStatus = 'unknown';
+      m.redraw.sync();
+    }
+  }
+};
+if (browser.tabs?.onActivated) {
+  browser.tabs.onActivated.addListener((info) => refreshOptionsActive(info.tabId, info.windowId));
+  browser.tabs.onRemoved?.addListener((_tabId, info) => refreshOptionsActive(null, info?.windowId));
+  browser.tabs.onUpdated?.addListener((tabId, info, tab) => {
+    if (tab?.active && info && (info.url || info.status === 'complete')) {
+      refreshOptionsActive(tabId, tab.windowId);
+    }
+  });
+  browser.windows?.onFocusChanged?.addListener((windowId) => refreshOptionsActive(null, windowId));
+  refreshOptionsActive();
+}
+
+/** @param {string} view */
+const routeArgs = (view) => ({ state: currentState, send, voiceManager, uiActions, view, optionsActive, activeTabStatus });
+
+// First-run onboarding is NOT gated here — it lives on the HOME page as a
+// blocker (home.js needsOnboarding gate). The side panel is reached by popping
+// it from an already-onboarded home, so routing it through onboarding too only
+// caused a surprise trigger when the panel opened after home use.
+
+// why only two routes: settings + context (memory/activity/denylist/
+// skills/hooks) moved to the full-tab options page — the panel is the
+// pure conversation surface. The old /settings, /skills, and /logs
+// routes died with their views; pre-release means no alias shims
+// (docs/DECISIONS.md #17).
+//
+// why ONE shared component for both routes: it's a SPA and the header
+// doesn't change between /chat and /chats. Mapping each route to its own
+// inline {view} object made Mithril tear down + recreate App on every
+// switch (remounting the TopBar, replaying the wordmark intro). Pointing
+// both routes at the SAME `Root` component makes Mithril DIFF in place —
+// the header (and its one-time wordmark animation) persists; only the
+// `.body` view swaps. The active view is read from the route inside Root.
+const Root = {
+  view: () => {
+    const path = m.route.get();
+    return m(App, routeArgs(path.startsWith('/chats') ? 'chats' : 'chat'));
+  },
+};
+m.route(root, '/chat', { '/chat': Root, '/chats': Root });
